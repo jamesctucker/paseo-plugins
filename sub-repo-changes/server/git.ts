@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { ChangedFile, RepoSummary } from "./diff.shared";
+import type { ChangedFile, RepoSummary } from "../shared/diff";
 
 const execFileAsync = promisify(execFile);
 
@@ -89,6 +89,20 @@ export async function discoverRepos(rootPath: string): Promise<string[]> {
   return repos;
 }
 
+// Untracked OS/tool droppings carry no review value and otherwise dominate the
+// list in large workspaces, so they never reach the panel. Tracked entries
+// (even junk someone committed) always show, and user-authored tool config
+// (e.g. .claude/) is never junk, no matter how cache-like it looks.
+const JUNK_UNTRACKED_BASENAMES = new Set([".DS_Store", "Thumbs.db"]);
+const JUNK_UNTRACKED_PREFIXES = [".playwright-mcp/"];
+
+function isJunkUntracked(file: ChangedFile): boolean {
+  if (!file.untracked) return false;
+  const base = file.path.split("/").pop() ?? file.path;
+  if (JUNK_UNTRACKED_BASENAMES.has(base)) return true;
+  return JUNK_UNTRACKED_PREFIXES.some((prefix) => file.path.startsWith(prefix));
+}
+
 function classify(xy: string): ChangedFile["status"] | null {
   if (xy === "!!") return null; // ignored
   if (xy === "??") return "untracked";
@@ -168,7 +182,7 @@ async function summarizeRepo(repoPath: string, rootPath: string): Promise<RepoSu
       : Promise.resolve({ stdout: "", failed: false }),
   ]);
 
-  const files = parsePorcelainZ(statusResult.stdout);
+  const files = parsePorcelainZ(statusResult.stdout).filter((file) => !isJunkUntracked(file));
   // Merge worktree + index stats (or stats vs HEAD when available).
   const merged = new Map<string, { additions: number; deletions: number }>();
   const sources = hasHead ? [parseNumstatZ(headStat.stdout)] : [

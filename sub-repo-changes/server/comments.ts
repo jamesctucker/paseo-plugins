@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { DiffComment } from "./diff.shared";
+import type { DiffComment } from "../shared/diff";
 
 const STORE_PATH = path.join(os.homedir(), ".paseo", "sub-repo-changes-comments.json");
 

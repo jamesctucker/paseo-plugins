@@ -1,16 +1,16 @@
 import {
   type PluginWorkspacePanelProps,
   useRpc,
-} from "@getpaseo/plugin";
+} from "@getpaseo/plugin/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import React, { useMemo, useSyncExternalStore } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
-import { addComment, getFileDiff, listComments, removeComment } from "./diff.shared";
-import { DiffView, useColors } from "./panel-ui.client";
+import { addComment, getFileDiff, listComments, removeComment } from "../shared/diff";
+import { DiffView, useColors } from "./panel-ui";
 import {
   getDiffSelection,
   subscribeDiffSelection,
-} from "./store.shared";
+} from "../shared/store";
 
 /**
  * Main-area tab that shows the diff of the file currently selected in the
