@@ -7,7 +7,7 @@ import { setDiffTabOpener } from "./shared/store";
 export default function contribute(client: PluginClientContext) {
   client.addWorkspacePanel({
     id: "changes",
-    title: "Sub-Repo Changes",
+    title: "Nested Changes",
     icon: "GitCompareArrows",
     context: "workspace",
     locations: ["explorer"],
@@ -25,7 +25,7 @@ export default function contribute(client: PluginClientContext) {
 
   client.addCommandCenterItem({
     id: "open-changes",
-    title: "Open Sub-Repo Changes",
+    title: "Open Nested Changes",
     icon: "GitCompareArrows",
     keywords: ["git", "diff", "changes", "nested", "subrepo"],
     context: "workspace",

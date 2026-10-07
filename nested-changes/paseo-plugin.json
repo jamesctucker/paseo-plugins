@@ -1,0 +1,6 @@
+{
+  "id": "nested-changes",
+  "name": "Nested Changes",
+  "description": "Changed files across every git repo in a workspace, nested ones included, with a diff viewer, line comments, and a composer attachment source.",
+  "requirements": { "paseo": ">=0.8.0" }
+}

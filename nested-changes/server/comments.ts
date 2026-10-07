@@ -4,7 +4,9 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { DiffComment } from "../shared/diff";
 
-const STORE_PATH = path.join(os.homedir(), ".paseo", "sub-repo-changes-comments.json");
+const STORE_PATH = path.join(os.homedir(), ".paseo", "nested-changes-comments.json");
+// Written by the plugin's previous identity; read once so existing comments survive the rename.
+const LEGACY_STORE_PATH = path.join(os.homedir(), ".paseo", "sub-repo-changes-comments.json");
 
 type Store = Record<string, DiffComment[]>;
 
@@ -17,12 +19,16 @@ function fileKey(repoPath: string, filePath: string): string {
 
 async function loadStore(): Promise<Store> {
   if (cache) return cache;
-  try {
-    const raw = await fs.readFile(STORE_PATH, "utf8");
-    cache = JSON.parse(raw) as Store;
-  } catch {
-    cache = {};
+  for (const candidate of [STORE_PATH, LEGACY_STORE_PATH]) {
+    try {
+      const raw = await fs.readFile(candidate, "utf8");
+      cache = JSON.parse(raw) as Store;
+      return cache;
+    } catch {
+      // Try the next location; a missing file just means no comments yet.
+    }
   }
+  cache = {};
   return cache;
 }
 
