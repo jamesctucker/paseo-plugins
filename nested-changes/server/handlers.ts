@@ -1,6 +1,5 @@
 import type { RpcInput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import type { PaseoWorkspace } from "@getpaseo/client";
 import type {
   addComment,
   getFileDiff,
@@ -58,8 +57,11 @@ export async function handleSearchChangedFiles(
   let rootPaths: string[] = [];
   try {
     const result = await context.paseo.workspaces.list({});
+    // The workspace entry type flows in through PluginHandlerContext; importing
+    // @getpaseo/client directly would break Git installs, which have no
+    // node_modules and only resolve host-provided modules.
     rootPaths = result.entries
-      .map((entry: PaseoWorkspace) => entry.workspaceDirectory ?? entry.projectRootPath)
+      .map((entry) => entry.workspaceDirectory ?? entry.projectRootPath)
       .filter((root: string | undefined | null): root is string => Boolean(root));
   } catch (error) {
     console.error("Failed to list workspaces for attachment search", error);
