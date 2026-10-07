@@ -33,11 +33,18 @@ async function loadStore(): Promise<Store> {
 }
 
 function persist(store: Store): void {
-  writeQueue = writeQueue.then(async () => {
-    const tmp = `${STORE_PATH}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(store, null, 2), "utf8");
-    await fs.rename(tmp, STORE_PATH);
-  });
+  // The trailing catch keeps the queue resolved: without it, one failed write
+  // would reject the chain and every later comment would silently never save.
+  writeQueue = writeQueue
+    .catch(() => {})
+    .then(async () => {
+      const tmp = `${STORE_PATH}.tmp`;
+      await fs.writeFile(tmp, JSON.stringify(store, null, 2), "utf8");
+      await fs.rename(tmp, STORE_PATH);
+    })
+    .catch((error) => {
+      console.error("nested-changes: failed to persist comments", error);
+    });
 }
 
 export async function listFileComments(repoPath: string, filePath: string) {

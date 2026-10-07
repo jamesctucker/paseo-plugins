@@ -222,7 +222,6 @@ export function DiffView({
   truncated: boolean;
   binary: boolean;
   colors: Colors;
-  compact?: boolean;
   comments: DiffComment[];
   onAddComment: (side: "old" | "new", line: number, body: string) => void;
   onRemoveComment: (commentId: string) => void;
