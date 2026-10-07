@@ -1,4 +1,4 @@
-import type { output as ZodOutput } from "zod";
+import type { RpcInput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { PaseoWorkspace } from "@getpaseo/client";
 import type {
@@ -8,12 +8,12 @@ import type {
   listRepos,
   removeComment,
   searchChangedFiles,
-} from "./diff.shared";
-import { getFileDiffText, listRepoSummaries } from "./git.server";
-import { searchChangedFileAttachments } from "./attachments.server";
-import { addFileComment, listFileComments, removeFileComment } from "./comments.server";
+} from "../shared/diff";
+import { getFileDiffText, listRepoSummaries } from "./git";
+import { searchChangedFileAttachments } from "./attachments";
+import { addFileComment, listFileComments, removeFileComment } from "./comments";
 
-export async function handleListRepos({ rootPath }: ZodOutput<typeof listRepos.input>) {
+export async function handleListRepos({ rootPath }: RpcInput<typeof listRepos>) {
   const result = await listRepoSummaries(rootPath);
   return { scannedAt: new Date().toISOString(), ...result };
 }
@@ -22,14 +22,14 @@ export async function handleFileDiff({
   repoPath,
   filePath,
   untracked,
-}: ZodOutput<typeof getFileDiff.input>) {
+}: RpcInput<typeof getFileDiff>) {
   return getFileDiffText(repoPath, filePath, untracked);
 }
 
 export function handleListComments({
   repoPath,
   filePath,
-}: ZodOutput<typeof listComments.input>) {
+}: RpcInput<typeof listComments>) {
   return listFileComments(repoPath, filePath);
 }
 
@@ -39,7 +39,7 @@ export function handleAddComment({
   side,
   line,
   body,
-}: ZodOutput<typeof addComment.input>) {
+}: RpcInput<typeof addComment>) {
   return addFileComment(repoPath, filePath, side, line, body);
 }
 
@@ -47,12 +47,12 @@ export function handleRemoveComment({
   repoPath,
   filePath,
   commentId,
-}: ZodOutput<typeof removeComment.input>) {
+}: RpcInput<typeof removeComment>) {
   return removeFileComment(repoPath, filePath, commentId);
 }
 
 export async function handleSearchChangedFiles(
-  input: ZodOutput<typeof searchChangedFiles.input>,
+  input: RpcInput<typeof searchChangedFiles>,
   context: PluginHandlerContext,
 ) {
   let rootPaths: string[] = [];

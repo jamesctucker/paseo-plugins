@@ -1,7 +1,7 @@
 import path from "node:path";
-import type { output as ZodOutput } from "zod";
-import type { searchChangedFiles } from "./diff.shared";
-import { getFileDiffText, listRepoSummaries, type RepoSummaryList } from "./git.server";
+import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
+import type { searchChangedFiles } from "../shared/diff";
+import { getFileDiffText, listRepoSummaries, type RepoSummaryList } from "./git";
 
 const DIFF_CONTEXT_CAP = 8000;
 const SCAN_CACHE_MS = 5000;
@@ -35,10 +35,10 @@ function matchScore(fileName: string, repoRelPath: string, query: string): numbe
  * back to roots the daemon knows via a injected provider.
  */
 export async function searchChangedFileAttachments(
-  { query }: ZodOutput<typeof searchChangedFiles.input>,
+  { query }: RpcInput<typeof searchChangedFiles>,
   rootPaths: string[],
 ) {
-  const items: ZodOutput<typeof searchChangedFiles.output>["items"] = [];
+  const items: RpcOutput<typeof searchChangedFiles>["items"] = [];
   const seenRoots = new Set<string>();
 
   for (const rootPath of rootPaths) {

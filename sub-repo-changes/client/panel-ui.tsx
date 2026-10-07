@@ -1,7 +1,7 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import type { DiffComment } from "./diff.shared";
+import type { DiffComment } from "../shared/diff";
 
 export function useColors(theme: PluginTheme) {
   return useMemo(
@@ -155,6 +155,8 @@ function CommentChip({
   colors: Colors;
   onRemove: (id: string) => void;
 }) {
+  // A stray tap shouldn't silently lose review text, so removal arms first.
+  const [armed, setArmed] = useState(false);
   return (
     <View
       style={{
@@ -177,9 +179,32 @@ function CommentChip({
       <Text selectable style={{ color: colors.foreground, fontSize: 12, flex: 1 }}>
         {comment.body}
       </Text>
-      <Pressable accessibilityRole="button" onPress={() => onRemove(comment.id)}>
-        <Text style={{ color: colors.muted, fontSize: 14 }}>×</Text>
-      </Pressable>
+      {armed ? (
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Confirm remove comment"
+            onPress={() => onRemove(comment.id)}
+          >
+            <Text style={{ color: colors.danger, fontSize: 12, fontWeight: "600" }}>Remove</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Keep comment"
+            onPress={() => setArmed(false)}
+          >
+            <Text style={{ color: colors.muted, fontSize: 12 }}>Keep</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Remove comment"
+          onPress={() => setArmed(true)}
+        >
+          <Text style={{ color: colors.muted, fontSize: 14 }}>×</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
