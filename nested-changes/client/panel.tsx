@@ -360,7 +360,7 @@ export function NestedDiffPanel({ theme, layout, workspaceId }: PluginWorkspaceP
   );
 
   const reposQuery = useQuery({
-    queryKey: ["nested-diff-repos", workspace?.directory],
+    queryKey: ["nested-changes-repos", workspace?.directory],
     queryFn: () => list({ rootPath: workspace?.directory ?? "" }),
     enabled: Boolean(workspace?.directory),
     refetchInterval: 5000,
@@ -384,7 +384,7 @@ export function NestedDiffPanel({ theme, layout, workspaceId }: PluginWorkspaceP
         }}
       >
         <Text style={{ color: colors.foreground, fontSize: compact ? 15 : 16, fontWeight: "600" }}>
-          Sub-Repo Changes
+          Nested Changes
         </Text>
         {reposQuery.data && (
           <CountBadge

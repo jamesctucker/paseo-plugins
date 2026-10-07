@@ -28,11 +28,11 @@ export function DiffViewerPanel({ theme, layout, workspaceId }: PluginWorkspaceP
   const removeCommentRpc = useRpc(removeComment);
 
   const diffKey = useMemo(
-    () => ["sub-repo-changes-file", selection?.repoPath, selection?.filePath] as const,
+    () => ["nested-changes-file", selection?.repoPath, selection?.filePath] as const,
     [selection?.repoPath, selection?.filePath],
   );
   const commentsKey = useMemo(
-    () => ["sub-repo-changes-comments", selection?.repoPath, selection?.filePath] as const,
+    () => ["nested-changes-comments", selection?.repoPath, selection?.filePath] as const,
     [selection?.repoPath, selection?.filePath],
   );
 
@@ -73,7 +73,7 @@ export function DiffViewerPanel({ theme, layout, workspaceId }: PluginWorkspaceP
           No file selected
         </Text>
         <Text style={{ color: colors.muted, fontSize: 13, textAlign: "center" }}>
-          Pick a changed file in Sub-Repo Changes (Explorer).
+          Pick a changed file in Nested Changes (Explorer).
         </Text>
       </View>
     );

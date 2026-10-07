@@ -96,14 +96,14 @@ export async function discoverRepos(rootPath: string): Promise<string[]> {
 const JUNK_UNTRACKED_BASENAMES = new Set([".DS_Store", "Thumbs.db"]);
 const JUNK_UNTRACKED_PREFIXES = [".playwright-mcp/"];
 
-function isJunkUntracked(file: ChangedFile): boolean {
+export function isJunkUntracked(file: ChangedFile): boolean {
   if (!file.untracked) return false;
   const base = file.path.split("/").pop() ?? file.path;
   if (JUNK_UNTRACKED_BASENAMES.has(base)) return true;
   return JUNK_UNTRACKED_PREFIXES.some((prefix) => file.path.startsWith(prefix));
 }
 
-function classify(xy: string): ChangedFile["status"] | null {
+export function classify(xy: string): ChangedFile["status"] | null {
   if (xy === "!!") return null; // ignored
   if (xy === "??") return "untracked";
   if (xy.includes("U")) return "unmerged";
@@ -114,7 +114,7 @@ function classify(xy: string): ChangedFile["status"] | null {
   return "modified";
 }
 
-function parsePorcelainZ(stdout: string): ChangedFile[] {
+export function parsePorcelainZ(stdout: string): ChangedFile[] {
   const records = stdout.split("\0");
   const files: ChangedFile[] = [];
   for (let i = 0; i < records.length; i++) {
@@ -142,7 +142,7 @@ function parsePorcelainZ(stdout: string): ChangedFile[] {
   return files;
 }
 
-function parseNumstatZ(stdout: string): Map<string, { additions: number; deletions: number }> {
+export function parseNumstatZ(stdout: string): Map<string, { additions: number; deletions: number }> {
   const stats = new Map<string, { additions: number; deletions: number }>();
   const records = stdout.split("\0");
   for (let i = 0; i < records.length; i++) {
