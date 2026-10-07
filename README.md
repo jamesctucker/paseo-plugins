@@ -1,6 +1,6 @@
 # paseo-plugins
 
-[Paseo](https://paseo.sh/) plugins by James Tucker, one per folder.
+[Paseo](https://paseo.sh/) plugins, one per folder.
 
 ## Plugins
 
