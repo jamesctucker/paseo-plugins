@@ -7,6 +7,7 @@
 | Plugin | Description |
 |--------|-------------|
 | [`nested-changes/`](nested-changes/) | "Nested Changes" Explorer panel: lists git changes across the workspace root **and** nested repos (e.g. a `work/` directory of checkouts), which Paseo's native diff viewer misses. Clicking a file opens a main-tab diff view with a line-number gutter and persistent line comments. Ships a composer attachment source ("Changed file") for attaching diffs to agent chats. |
+| [`skill-radar/`](skill-radar/) | "Skill Radar" sidebar screen: ranks the workspace's agent skills against the last five user messages using a Cloudflare Clef decision model, shows confidence-scored suggestions plus a collapsible catalog, and adds a composer pill when the best match clears 70%. One click copies the skill name. |
 
 ## Install
 
@@ -14,6 +15,7 @@ From GitHub directly (no build step — plugins only use host-provided modules a
 
 ```bash
 paseo plugin add git:jamesctucker/paseo-plugins:nested-changes
+paseo plugin add git:jamesctucker/paseo-plugins:skill-radar
 ```
 
 Requires the daemon-wide **Enable plugins** switch (Settings → Plugins).

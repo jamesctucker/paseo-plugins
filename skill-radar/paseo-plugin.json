@@ -1,0 +1,9 @@
+{
+  "id": "skill-radar",
+  "name": "Skill Radar",
+  "description": "Surfaces the agent skills worth invoking right now, ranked against your recent conversation, plus a browsable catalog and a composer pill.",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.12.0"
+  }
+}
