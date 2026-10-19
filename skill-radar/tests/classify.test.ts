@@ -22,9 +22,15 @@ async function fixture() {
   process.env.OPENROUTER_API_KEY = "test-key";
 }
 
-function decisionResponse(probabilities: Record<string, number>) {
+function decisionResponse(
+  probabilities: Record<string, number>,
+  extra: { choice?: string; confidence?: number } = {},
+) {
   return new Response(
-    JSON.stringify({ model: "cloudflare/clef-flash", answers: { skill: { type: "choice", probabilities } } }),
+    JSON.stringify({
+      model: "cloudflare/clef-flash",
+      answers: { skill: { type: "choice", probabilities, ...extra } },
+    }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
 }
@@ -34,6 +40,7 @@ beforeEach(() => fixture());
 afterEach(async () => {
   vi.unstubAllGlobals();
   delete process.env.SKILL_RADAR_SKILL_ROOTS;
+  delete process.env.SKILL_RADAR_MODEL;
   delete process.env.OPENROUTER_API_KEY;
   if (root) await rm(root, { recursive: true, force: true });
   root = null;
@@ -97,5 +104,98 @@ describe("classification", () => {
     await classify(["a repeated conversation body"]);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns no matches when none wins the probability mass", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => decisionResponse({ none: 0.6, diagnose: 0.35, retro: 0.05 })),
+    );
+
+    const result = await classify(["nothing here fits any skill"]);
+    expect(result.status).toBe("ok");
+    expect(result.matches).toEqual([]);
+  });
+
+  it("returns no matches when the explicit choice is none, even if a skill looks strong", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => decisionResponse({ diagnose: 0.52, none: 0.45 }, { choice: "none" })),
+    );
+
+    const result = await classify(["vague chit chat about nothing actionable"]);
+    expect(result.matches).toEqual([]);
+  });
+
+  it("scores the top match with the model's confidence when provided", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        decisionResponse({ diagnose: 0.4, retro: 0.35, none: 0.25 }, { choice: "diagnose", confidence: 0.88 }),
+      ),
+    );
+
+    const result = await classify(["help me figure out why this crashes"]);
+    expect(result.matches[0]).toEqual({ name: "diagnose", confidence: 88 });
+    expect(result.matches[1]).toEqual({ name: "retro", confidence: 35 });
+  });
+
+  it("does not cache failures, so a transient error recovers on the next call", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("upstream exploded", { status: 503 }))
+      .mockResolvedValueOnce(decisionResponse({ diagnose: 0.9 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await classify(["retry me after a failure"]);
+    const second = await classify(["retry me after a failure"]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(first.status).toBe("unavailable");
+    expect(second.status).toBe("ok");
+    expect(second.matches[0].name).toBe("diagnose");
+  });
+
+  it("dedupes concurrent identical classifications into one upstream call", async () => {
+    let release!: (response: Response) => void;
+    const gate = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const fetchMock = vi.fn(() => gate);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = classify(["a concurrent identical conversation"]);
+    const second = classify(["a concurrent identical conversation"]);
+    release(decisionResponse({ diagnose: 0.9 }));
+    const [one, two] = await Promise.all([first, second]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(one.matches[0].name).toBe("diagnose");
+    expect(two.matches[0].name).toBe("diagnose");
+  });
+
+  it("keys the cache by model so a model switch reclassifies", async () => {
+    const fetchMock = vi.fn(async () => decisionResponse({ diagnose: 0.8 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    process.env.SKILL_RADAR_MODEL = "cloudflare/clef";
+    await classify(["a model keyed conversation"]);
+    process.env.SKILL_RADAR_MODEL = "cloudflare/clef-flash";
+    await classify(["a model keyed conversation"]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("middle-truncates oversized messages instead of sending unbounded state", async () => {
+    const fetchMock = vi.fn(async () => decisionResponse({ diagnose: 0.9 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await classify(["x".repeat(50_000)]);
+
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(init.body as string);
+    const conversation = body.state.conversation as string;
+    expect(conversation.length).toBeLessThan(2_100);
+    expect(conversation).toContain("[truncated]");
   });
 });
