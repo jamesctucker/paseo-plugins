@@ -38,10 +38,8 @@ export const classifyContext = defineRpc({
   }),
 });
 
-/** Matches below this never reach the composer pill; the panel still shows the ranked list. */
-export const PILL_THRESHOLD = 70;
-/** Below this the panel shows "No strong matches yet" instead of a wall of 1% scores. */
-export const SUGGESTION_FLOOR = 15;
+/** A skill is only suggested, in the panel or the composer pill, at or above this confidence. */
+export const CONFIDENCE_THRESHOLD = 70;
 export const MAX_SUGGESTIONS = 5;
 export const CONTEXT_MESSAGES = 5;
 /** Wait for the conversation to settle before spending a classification call. */
