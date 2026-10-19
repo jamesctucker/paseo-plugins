@@ -31,7 +31,7 @@ The model call uses OpenRouter's `POST /api/alpha/decisions` endpoint. Clef is a
 | Composer pill | Top skill at or above 70 percent confidence, per agent |
 | Command Center | "Open Skill Radar" |
 
-Clicking a skill row or the pill copies the skill name.
+Clicking a skill row or the pill copies the skill name. Hovering (or long pressing) a row whose description is truncated shows the full description.
 
 ## Development
 

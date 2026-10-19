@@ -18,7 +18,7 @@ Skills are read from `~/the-garage/.opencode/skills` and `~/.agents/skills`. Set
 
 ## What you get
 
-The Explorer panel has two sections. Relevant now shows ranked matches with confidence scores and the first "Use when" phrase from each description. All skills is a collapsible category list of the whole catalog. Clicking any row copies the skill name. A short toast confirms the copy.
+The Explorer panel has two sections. Relevant now shows ranked matches with confidence scores and the first "Use when" phrase from each description. All skills is a collapsible category list of the whole catalog. Clicking any row copies the skill name. A short toast confirms the copy. When a description is too long for its row, hovering or long pressing reveals the full text.
 
 The composer pill sits next to Tasks and Subagents on each agent. It shows the top skill when confidence is at least 70 percent, copies the name on press, and disappears after 30 seconds or when new context arrives. The pill is the only thing that interrupts: a dismissed warning banner and low confidence matches stay in the panel.
 
