@@ -44,10 +44,25 @@ interface Pill {
   hideTimer: ReturnType<typeof setTimeout> | null;
 }
 
+type EnsureAgent = (agentId: string, workspaceId: string) => void;
+
+let ensureAgentHook: EnsureAgent | null = null;
+
+/**
+ * The Explorer panel asks for the focused agent's suggestions when its tab changes. The
+ * controller owns the timeline watcher, so classification state and the composer pill stay
+ * in one place.
+ */
+export function requestAgentSuggestions(agentId: string, workspaceId: string) {
+  ensureAgentHook?.(agentId, workspaceId);
+}
+
 export function startRadar(client: PluginClientContext): () => void {
   const lifetime = new AbortController();
   const watchers = new Map<string, Watcher>();
   const pills = new Map<string, Pill>();
+  /** Agents the user is actively looking at, kept watching even when outside the recency cap. */
+  const pinned = new Set<string>();
 
   const stopped = () => lifetime.signal.aborted;
 
@@ -234,15 +249,15 @@ export function startRadar(client: PluginClientContext): () => void {
     });
     watcher.release = subscription;
 
-    const recent = autoClassify && Date.now() - watcher.lastActivityAt < AUTO_CLASSIFY_WINDOW_MS;
     void subscription.ready
-      .then(() => seed(watcher, recent))
+      .then(() => seed(watcher, autoClassify))
       .catch(() => {
         // Establishment failed; the directory snapshot will reconcile on the next update.
       });
   };
 
   const unwatch = (agentId: string) => {
+    pinned.delete(agentId);
     const watcher = watchers.get(agentId);
     if (!watcher) return;
     if (watcher.timer) clearTimeout(watcher.timer);
@@ -259,6 +274,28 @@ export function startRadar(client: PluginClientContext): () => void {
     forgetAgent(agentId);
   };
 
+  const ensureAgent: EnsureAgent = (agentId, workspaceId) => {
+    if (stopped()) return;
+    pinned.delete(agentId);
+    pinned.add(agentId);
+    if (pinned.size > WATCHED_AGENT_LIMIT) {
+      const oldest = pinned.values().next().value;
+      if (oldest) pinned.delete(oldest);
+    }
+
+    const existing = watchers.get(agentId);
+    if (existing) {
+      const state = agentRadarState(agentId);
+      if (existing.seeded && existing.messages.length > 0 && (state.status === "idle" || state.status === "unavailable")) {
+        scheduleClassify(existing, 0);
+      }
+      return;
+    }
+    watch({ id: agentId, workspaceId }, true);
+  };
+
+  ensureAgentHook = ensureAgent;
+
   const directory = new Map<string, DirectoryAgent>();
 
   const eligible = (agent: DirectoryAgent): boolean => {
@@ -272,12 +309,22 @@ export function startRadar(client: PluginClientContext): () => void {
       .sort((a, b) => activityOf(b) - activityOf(a))
       .slice(0, WATCHED_AGENT_LIMIT);
 
-    const keep = new Set(eligibleAgents.map((agent) => agent.id));
+    const keep = new Set([...eligibleAgents.map((agent) => agent.id), ...pinned]);
     for (const agentId of [...watchers.keys()]) {
       if (!keep.has(agentId)) unwatch(agentId);
     }
     const mostRecent = eligibleAgents[0]?.id;
-    for (const agent of eligibleAgents) watch(agent, agent.id === mostRecent);
+    for (const agent of eligibleAgents) {
+      const autoClassify = agent.id === mostRecent && Date.now() - activityOf(agent) < AUTO_CLASSIFY_WINDOW_MS;
+      watch(agent, autoClassify);
+    }
+    // A pinned agent might not be in today's directory page anymore; let the next update retire it.
+    for (const agentId of pinned) {
+      if (!watchers.has(agentId) && directory.has(agentId)) {
+        const agent = directory.get(agentId) as DirectoryAgent;
+        if (agent.workspaceId) watch(agent, true);
+      }
+    }
   };
 
   void client.paseo.agents
@@ -308,6 +355,7 @@ export function startRadar(client: PluginClientContext): () => void {
     });
 
   return () => {
+    ensureAgentHook = null;
     lifetime.abort();
     for (const watcher of watchers.values()) {
       if (watcher.timer) clearTimeout(watcher.timer);
