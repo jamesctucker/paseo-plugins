@@ -80,6 +80,7 @@ describe("classification", () => {
     expect(url).toBe("https://openrouter.ai/api/alpha/decisions");
     const body = JSON.parse(init.body as string);
     expect(body.model).toBe("cloudflare/clef-flash");
+    expect(body.provider).toEqual({ order: ["primeintellect"], allow_fallbacks: false });
     expect(body.questions.skill.type).toBe("choice");
     expect(Object.keys(body.questions.skill.criteria)).toContain("diagnose");
   });
@@ -131,13 +132,24 @@ describe("classification", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
-        decisionResponse({ diagnose: 0.4, retro: 0.35, none: 0.25 }, { choice: "diagnose", confidence: 0.88 }),
+        decisionResponse({ diagnose: 0.4, retro: 0.35, none: 0.1 }, { choice: "diagnose", confidence: 0.88 }),
       ),
     );
 
     const result = await classify(["help me figure out why this crashes"]);
     expect(result.matches[0]).toEqual({ name: "diagnose", confidence: 88 });
     expect(result.matches[1]).toEqual({ name: "retro", confidence: 35 });
+  });
+
+  it("suppresses a top skill that does not clearly beat none", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => decisionResponse({ diagnose: 0.15, none: 0.1, retro: 0.05 })),
+    );
+
+    const result = await classify(["a flat guessy conversation"]);
+    expect(result.status).toBe("ok");
+    expect(result.matches).toEqual([]);
   });
 
   it("does not cache failures, so a transient error recovers on the next call", async () => {

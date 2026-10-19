@@ -21,7 +21,7 @@ Requires Paseo 0.12 or later, and the global plugins switch enabled on the daemo
 | `SKILL_RADAR_GARAGE_ROOT` | Workspace root holding `.opencode/skills` | `~/the-garage` |
 | `SKILL_RADAR_SKILL_ROOTS` | Colon separated roots; first is workspace | unset |
 
-The model call uses OpenRouter's `POST /api/alpha/decisions` endpoint. Clef is a decision model and rejects `chat/completions`.
+The model call uses OpenRouter's `POST /api/alpha/decisions` endpoint. Clef is a decision model and rejects `chat/completions`. The request pins `cloudflare/clef-flash` (its own canonical slug) to the PrimeIntellect provider with fallbacks off, because the panel (50) and pill (72) thresholds were probed against that provider's serving on 2026-10-19 — re-probe before changing `SKILL_RADAR_MODEL` or the provider pin.
 
 ## What it contributes
 

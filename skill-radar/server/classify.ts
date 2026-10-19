@@ -14,7 +14,14 @@ type Classification = {
 };
 
 const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
+/**
+ * Verified 2026-10-19: this id IS the canonical slug (no dated variant exists), and the
+ * panel/pill thresholds were probed against PrimeIntellect's serving. Other providers
+ * quantize differently and can shift probabilities, so the provider is pinned too —
+ * re-probe thresholds before changing either.
+ */
 const DEFAULT_MODEL = "cloudflare/clef-flash";
+const PROVIDER_PREFERENCE = { order: ["primeintellect"], allow_fallbacks: false };
 const REQUEST_TIMEOUT_MS = 9_000;
 const RESULT_CACHE_MS = 60_000;
 const NO_MATCH = "none";
@@ -200,12 +207,17 @@ function rankMatches(answer: ChoiceAnswer, catalog: SkillCatalog): Match[] {
     top = bestKnown[0];
   }
 
+  // A skill barely ahead of none is a flat-distribution guess, not a match. Probing
+  // showed correct picks always clear 2× P(none) while guessy false positives do not.
+  const topProbability = answer.probabilities[top] ?? 0;
+  if (topProbability <= 2 * (answer.probabilities[NO_MATCH] ?? 0)) return [];
+
   // Prefer the model's confidence for the top score: raw option probability dilutes
   // as the catalog grows, so it cannot carry the panel/pill thresholds on its own.
   const topScore =
     answer.confidence !== null
       ? clampPercent(Math.round(answer.confidence * 100))
-      : clampPercent(Math.round((answer.probabilities[top] ?? 0) * 100));
+      : clampPercent(Math.round(topProbability * 100));
 
   const matches: Match[] = [{ name: top, confidence: topScore }];
   for (const [name, probability] of byProbability) {
@@ -227,6 +239,7 @@ async function requestClassification(messages: string[], catalog: SkillCatalog):
   const conversation = messages.map((message, index) => `[${index + 1}] ${message}`).join("\n\n");
   const body = {
     model: modelName(),
+    provider: PROVIDER_PREFERENCE,
     state: {
       conversation,
       catalog: catalog.skills

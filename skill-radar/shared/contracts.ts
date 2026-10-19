@@ -40,8 +40,12 @@ export const classifyContext = defineRpc({
 
 /** A panel row is shown at or above this confidence. */
 export const PANEL_THRESHOLD = 50;
-/** The composer pill is stricter than the panel so it only interrupts for a clear match. */
-export const PILL_THRESHOLD = 70;
+/**
+ * The composer pill is stricter than the panel so it only interrupts for a clear match.
+ * Probed against clef-flash on PrimeIntellect (2026-10-19): adversarial false positives
+ * reached 68.8 while correct picks jumped from 70.8 to 81.5, so 72 sits in the gap.
+ */
+export const PILL_THRESHOLD = 72;
 export const MAX_SUGGESTIONS = 5;
 export const CONTEXT_MESSAGES = 5;
 /** Wait for the conversation to settle before spending a classification call. */
