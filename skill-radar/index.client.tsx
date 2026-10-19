@@ -7,7 +7,7 @@ export default function contribute(client: PluginClientContext) {
     id: "radar",
     title: "Skill Radar",
     icon: "Radar",
-    context: "agent",
+    context: "workspace",
     locations: ["explorer"],
     Component: SkillRadarPanel,
   });
@@ -17,7 +17,7 @@ export default function contribute(client: PluginClientContext) {
     title: "Open Skill Radar",
     icon: "Radar",
     keywords: ["skills", "suggestions", "classify", "recall"],
-    context: "agent",
+    context: "workspace",
     onSelect({ openPanel }) {
       openPanel("radar", { location: "explorer" });
     },

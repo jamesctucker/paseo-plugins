@@ -79,6 +79,19 @@ export function dismissBanner() {
   emit();
 }
 
+/**
+ * The Explorer panel is workspace-scoped, so it follows the most recently active agent in
+ * that workspace rather than whichever agent happened to classify last anywhere.
+ */
+export function stateForWorkspace(snapshot: RadarSnapshot, workspaceId: string): AgentRadarState | null {
+  let best: AgentRadarState | null = null;
+  for (const state of Object.values(snapshot.states)) {
+    if (state.workspaceId !== workspaceId) continue;
+    if (!best || state.updatedAt > best.updatedAt) best = state;
+  }
+  return best;
+}
+
 export function forgetAgent(agentId: string) {
   if (!states.delete(agentId)) return;
   emit();
