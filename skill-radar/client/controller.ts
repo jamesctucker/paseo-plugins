@@ -7,15 +7,15 @@ import {
   PILL_TTL_MS,
   classifyContext,
 } from "../shared/contracts";
-import { agentRadarState, forgetAgent, patchAgentState } from "./store";
+import { agentRadarState, forgetAgent, patchAgentState, setAgentLabel } from "./store";
 
 const RECENT_AGENT_WINDOW_MS = 12 * 60 * 60 * 1000;
-const AUTO_CLASSIFY_WINDOW_MS = 2 * 60 * 60 * 1000;
 const WATCHED_AGENT_LIMIT = 6;
 
 interface DirectoryAgent {
   id: string;
   workspaceId?: string | null;
+  title?: string | null;
   updatedAt?: string;
   lastUserMessageAt?: string | null;
 }
@@ -207,7 +207,9 @@ export function startRadar(client: PluginClientContext): () => void {
   };
 
   const watch = (agent: DirectoryAgent, autoClassify: boolean) => {
-    if (!agent.workspaceId || watchers.has(agent.id) || stopped()) return;
+    if (!agent.workspaceId || stopped()) return;
+    if (agent.title) setAgentLabel(agent.id, agent.title);
+    if (watchers.has(agent.id)) return;
     ensurePill(agent.id, agent.workspaceId);
 
     const watcher: Watcher = {
@@ -275,11 +277,8 @@ export function startRadar(client: PluginClientContext): () => void {
     for (const agentId of [...watchers.keys()]) {
       if (!keep.has(agentId)) unwatch(agentId);
     }
-    const mostRecent = eligibleAgents[0]?.id;
-    for (const agent of eligibleAgents) {
-      const autoClassify = agent.id === mostRecent && Date.now() - activityOf(agent) < AUTO_CLASSIFY_WINDOW_MS;
-      watch(agent, autoClassify);
-    }
+    // Every watched tab needs a row in "Relevant now", so seed and classify each one once.
+    for (const agent of eligibleAgents) watch(agent, true);
   };
 
   void client.paseo.agents
