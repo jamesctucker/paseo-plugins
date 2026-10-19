@@ -17,12 +17,15 @@ export interface AgentRadarState {
 
 export interface RadarSnapshot {
   states: Record<string, AgentRadarState>;
+  /** Agent display names, keyed by agent ID. Titles can change while a watcher lives. */
+  labels: Record<string, string>;
   bannerDismissed: boolean;
 }
 
 const EMPTY: AgentRadarState = { status: "idle", matches: [], reason: null, workspaceId: null, updatedAt: 0 };
 
 let states = new Map<string, AgentRadarState>();
+let labels = new Map<string, string>();
 let bannerDismissed = false;
 let snapshot: RadarSnapshot = build();
 const listeners = new Set<() => void>();
@@ -30,6 +33,7 @@ const listeners = new Set<() => void>();
 function build(): RadarSnapshot {
   return {
     states: Object.fromEntries(states),
+    labels: Object.fromEntries(labels),
     bannerDismissed,
   };
 }
@@ -79,26 +83,21 @@ export function dismissBanner() {
   emit();
 }
 
-/**
- * The Explorer panel is workspace-scoped, so it follows the most recently active agent in
- * that workspace rather than whichever agent happened to classify last anywhere.
- */
-export function stateForWorkspace(snapshot: RadarSnapshot, workspaceId: string): AgentRadarState | null {
-  let best: AgentRadarState | null = null;
-  for (const state of Object.values(snapshot.states)) {
-    if (state.workspaceId !== workspaceId) continue;
-    if (!best || state.updatedAt > best.updatedAt) best = state;
-  }
-  return best;
+export function setAgentLabel(agentId: string, title: string) {
+  if (labels.get(agentId) === title) return;
+  labels.set(agentId, title);
+  emit();
 }
 
 export function forgetAgent(agentId: string) {
-  if (!states.delete(agentId)) return;
-  emit();
+  const hadState = states.delete(agentId);
+  const hadLabel = labels.delete(agentId);
+  if (hadState || hadLabel) emit();
 }
 
 export function resetRadar() {
   states = new Map();
+  labels = new Map();
   bannerDismissed = false;
   emit();
 }

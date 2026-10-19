@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { LayoutAnimation, Pressable, Text, View } from "react-native";
 import type { z } from "zod";
 import { listSkills, skillEntrySchema, SUGGESTION_FLOOR } from "../shared/contracts";
-import { dismissBanner, stateForWorkspace, useRadar, type RadarMatch } from "./store";
+import { dismissBanner, useRadar, type RadarMatch } from "./store";
 
 type SkillEntry = z.infer<typeof skillEntrySchema>;
 type Catalog = z.infer<typeof listSkills.output>;
@@ -79,9 +79,10 @@ function buildStyles(theme: Theme, compact: boolean) {
     cardPressed: { backgroundColor: colors.surface2 },
     lifted: { zIndex: 20, elevation: 20 },
     cardTop: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8 },
-    name: { color: colors.foreground, fontWeight: "600" as const },
+    agentLabel: { color: colors.foregroundMuted, fontSize: 11, flexShrink: 1 },
+    skillLine: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8 },
+    name: { color: colors.foreground, fontSize: 14, fontWeight: "600" as const },
     trigger: { color: colors.foregroundMuted, fontSize: 11.5, lineHeight: 15 },
-    triggerRow: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8 },
     score: {
       flexDirection: "row" as const,
       alignItems: "center" as const,
@@ -173,6 +174,14 @@ function buildStyles(theme: Theme, compact: boolean) {
 
 type PanelStyles = ReturnType<typeof buildStyles>;
 
+interface AgentSuggestion {
+  agentId: string;
+  label: string;
+  match: RadarMatch;
+  skill: SkillEntry | undefined;
+  updatedAt: number;
+}
+
 interface TooltipProps {
   text: string;
   top: number;
@@ -190,7 +199,7 @@ function Tooltip({ text, top, styles }: TooltipProps) {
 interface SuggestionCardProps {
   match: RadarMatch;
   skill: SkillEntry | undefined;
-  isTop: boolean;
+  agentLabel: string;
   compact: boolean;
   copied: boolean;
   styles: PanelStyles;
@@ -198,7 +207,7 @@ interface SuggestionCardProps {
   onCopy(): void;
 }
 
-function SuggestionCard({ match, skill, isTop, compact, copied, styles, accent, onCopy }: SuggestionCardProps) {
+function SuggestionCard({ match, skill, agentLabel, compact, copied, styles, accent, onCopy }: SuggestionCardProps) {
   const [hovered, setHovered] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [height, setHeight] = useState(0);
@@ -210,7 +219,7 @@ function SuggestionCard({ match, skill, isTop, compact, copied, styles, accent, 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Copy ${match.name}, ${match.confidence} percent match`}
+      accessibilityLabel={`Copy ${match.name} for ${agentLabel}, ${match.confidence} percent match`}
       accessibilityHint="Shows the full description on hover or long press"
       onPress={() => {
         setPinned(false);
@@ -223,19 +232,24 @@ function SuggestionCard({ match, skill, isTop, compact, copied, styles, accent, 
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed, showTooltip && styles.lifted]}
     >
       <View style={styles.cardTop}>
-        <Text style={[styles.name, { fontSize: isTop ? (compact ? 14 : 15) : 13.5 }]}>{match.name}</Text>
+        <Text style={styles.agentLabel} numberOfLines={1}>
+          {agentLabel}
+        </Text>
         <View style={[styles.score, match.confidence > 90 && { borderColor: accent }]}>
-          <Text style={[styles.scoreText, isTop && { fontWeight: "700" }]}>{match.confidence}%</Text>
+          <Text style={styles.scoreText}>{match.confidence}%</Text>
         </View>
       </View>
-      <View style={styles.triggerRow}>
-        <Text style={styles.trigger} numberOfLines={compact ? 1 : 2}>
-          {skill ? triggerLabel(skill) : "Matched from your recent messages"}
+      <View style={styles.skillLine}>
+        <Text style={styles.name} numberOfLines={1}>
+          {match.name}
         </Text>
         {showCopy ? (
           <Icon name={copied ? "Check" : "Copy"} size={13} color={copied ? accent : styles.trigger.color} />
         ) : null}
       </View>
+      <Text style={styles.trigger} numberOfLines={compact ? 1 : 2}>
+        {skill ? triggerLabel(skill) : "Matched from your recent messages"}
+      </Text>
 
       {showTooltip && description ? <Tooltip text={description} top={height + 6} styles={styles} /> : null}
     </Pressable>
@@ -333,9 +347,28 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
   const styles = useMemo(() => buildStyles(theme, layout.compact), [theme, layout.compact]);
   const skills = useMemo(() => (catalog.status === "ready" ? catalog.catalog.skills : []), [catalog]);
   const groups = useMemo(() => groupSkills(skills), [skills]);
-  const activeState = stateForWorkspace(radar, workspaceId);
-  const suggestions = (activeState?.matches ?? []).filter((match) => match.confidence >= SUGGESTION_FLOOR);
-  const showBanner = activeState?.status === "unavailable" && !radar.bannerDismissed;
+  const suggestions = useMemo<AgentSuggestion[]>(() => {
+    const rows: AgentSuggestion[] = [];
+    for (const [agentId, state] of Object.entries(radar.states)) {
+      if (state.workspaceId !== workspaceId || state.status !== "ready") continue;
+      const match = state.matches[0];
+      if (!match || match.confidence < SUGGESTION_FLOOR) continue;
+      rows.push({
+        agentId,
+        label: radar.labels[agentId] ?? "Untitled agent",
+        match,
+        skill: skills.find((entry) => entry.name === match.name),
+        updatedAt: state.updatedAt,
+      });
+    }
+    return rows.sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [radar.states, radar.labels, workspaceId, skills]);
+
+  const workspaceStates = Object.values(radar.states).filter((state) => state.workspaceId === workspaceId);
+  const analyzing = workspaceStates.some((state) => state.status === "analyzing");
+  const allUnavailable =
+    suggestions.length === 0 && workspaceStates.length > 0 && workspaceStates.every((state) => state.status === "unavailable");
+  const showBanner = allUnavailable && !radar.bannerDismissed;
 
   const toggleCategory = (category: string) => {
     animateAccordion(layout.platform);
@@ -358,34 +391,30 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
         </View>
       ) : null}
 
-      {activeState?.status === "unavailable" ? null : (
+      {allUnavailable ? null : (
         <View style={styles.zoneA}>
           <View style={styles.topRow}>
             <Text style={styles.sectionLabel}>Relevant now</Text>
-            {activeState?.status === "analyzing" ? <Text style={styles.meta}>Analyzing…</Text> : null}
+            {analyzing ? <Text style={styles.meta}>Analyzing…</Text> : null}
           </View>
 
-          {activeState?.status === "ready" && suggestions.length > 0 ? (
-            suggestions.map((match, index) => (
+          {suggestions.length > 0 ? (
+            suggestions.map((entry) => (
               <SuggestionCard
-                key={match.name}
-                match={match}
-                skill={skills.find((entry) => entry.name === match.name)}
-                isTop={index === 0}
+                key={entry.agentId}
+                match={entry.match}
+                skill={entry.skill}
+                agentLabel={entry.label}
                 compact={layout.compact}
-                copied={copied === match.name}
+                copied={copied === entry.match.name}
                 styles={styles}
                 accent={theme.colors.accent}
-                onCopy={() => void copySkill(match.name)}
+                onCopy={() => void copySkill(entry.match.name)}
               />
             ))
           ) : (
             <Text style={styles.empty}>
-              {activeState?.status === "analyzing"
-                ? "Analyzing context…"
-                : activeState?.status === "ready"
-                  ? "No strong matches yet — continue working."
-                  : "No suggestions yet — continue working."}
+              {analyzing ? "Analyzing context…" : "No strong matches yet — continue working."}
             </Text>
           )}
         </View>
