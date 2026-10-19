@@ -4,7 +4,7 @@ import { Icon, ScrollView, copyText, useToast } from "@getpaseo/plugin/client/re
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LayoutAnimation, Pressable, Text, View } from "react-native";
 import type { z } from "zod";
-import { listSkills, skillEntrySchema, SUGGESTION_FLOOR } from "../shared/contracts";
+import { CONFIDENCE_THRESHOLD, listSkills, skillEntrySchema } from "../shared/contracts";
 import { dismissBanner, useRadar, type RadarMatch } from "./store";
 
 type SkillEntry = z.infer<typeof skillEntrySchema>;
@@ -78,6 +78,7 @@ function buildStyles(theme: Theme, compact: boolean) {
     },
     cardPressed: { backgroundColor: colors.surface2 },
     lifted: { zIndex: 20, elevation: 20 },
+    sectionLifted: { zIndex: 15 },
     cardTop: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8 },
     agentLabel: { color: colors.foregroundMuted, fontSize: 11, flexShrink: 1 },
     skillLine: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8 },
@@ -200,14 +201,27 @@ interface SuggestionCardProps {
   match: RadarMatch;
   skill: SkillEntry | undefined;
   agentLabel: string;
+  sectionKey: string;
   compact: boolean;
   copied: boolean;
   styles: PanelStyles;
   accent: string;
   onCopy(): void;
+  onTooltipOpenChange(key: string, open: boolean): void;
 }
 
-function SuggestionCard({ match, skill, agentLabel, compact, copied, styles, accent, onCopy }: SuggestionCardProps) {
+function SuggestionCard({
+  match,
+  skill,
+  agentLabel,
+  sectionKey,
+  compact,
+  copied,
+  styles,
+  accent,
+  onCopy,
+  onTooltipOpenChange,
+}: SuggestionCardProps) {
   const [hovered, setHovered] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [height, setHeight] = useState(0);
@@ -215,6 +229,12 @@ function SuggestionCard({ match, skill, agentLabel, compact, copied, styles, acc
   const description = skill?.description ?? null;
   const showCopy = compact || hovered || copied;
   const showTooltip = description !== null && description.length > TRUNCATED_AT && (hovered || pinned);
+
+  useEffect(() => {
+    if (!showTooltip) return;
+    onTooltipOpenChange(sectionKey, true);
+    return () => onTooltipOpenChange(sectionKey, false);
+  }, [showTooltip, sectionKey, onTooltipOpenChange]);
 
   return (
     <Pressable
@@ -258,16 +278,24 @@ function SuggestionCard({ match, skill, agentLabel, compact, copied, styles, acc
 
 interface CatalogRowProps {
   skill: SkillEntry;
+  sectionKey: string;
   styles: PanelStyles;
   onCopy(): void;
+  onTooltipOpenChange(key: string, open: boolean): void;
 }
 
-function CatalogRow({ skill, styles, onCopy }: CatalogRowProps) {
+function CatalogRow({ skill, sectionKey, styles, onCopy, onTooltipOpenChange }: CatalogRowProps) {
   const [hovered, setHovered] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [height, setHeight] = useState(0);
 
   const showTooltip = skill.description.length > TRUNCATED_AT && (hovered || pinned);
+
+  useEffect(() => {
+    if (!showTooltip) return;
+    onTooltipOpenChange(sectionKey, true);
+    return () => onTooltipOpenChange(sectionKey, false);
+  }, [showTooltip, sectionKey, onTooltipOpenChange]);
 
   return (
     <Pressable
@@ -308,6 +336,18 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
   const [skillsOpen, setSkillsOpen] = useState(true);
   const [openCategories, setOpenCategories] = useState<Set<string>>(() => new Set());
   const [copied, setCopied] = useState<string | null>(null);
+  const [tooltipSections, setTooltipSections] = useState<Record<string, number>>({});
+
+  const onTooltipOpenChange = useCallback((key: string, open: boolean) => {
+    setTooltipSections((previous) => {
+      const count = (previous[key] ?? 0) + (open ? 1 : -1);
+      const next = { ...previous };
+      if (count > 0) next[key] = count;
+      else delete next[key];
+      return next;
+    });
+  }, []);
+  const sectionLifted = (key: string) => (tooltipSections[key] ?? 0) > 0;
 
   const load = useCallback(
     async (refresh: boolean) => {
@@ -352,7 +392,7 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
     for (const [agentId, state] of Object.entries(radar.states)) {
       if (state.workspaceId !== workspaceId || state.status !== "ready") continue;
       const match = state.matches[0];
-      if (!match || match.confidence < SUGGESTION_FLOOR) continue;
+      if (!match || match.confidence < CONFIDENCE_THRESHOLD) continue;
       rows.push({
         agentId,
         label: radar.labels[agentId] ?? "Untitled agent",
@@ -392,7 +432,7 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
       ) : null}
 
       {allUnavailable ? null : (
-        <View style={styles.zoneA}>
+        <View style={[styles.zoneA, sectionLifted("relevant") && styles.sectionLifted]}>
           <View style={styles.topRow}>
             <Text style={styles.sectionLabel}>Relevant now</Text>
             {analyzing ? <Text style={styles.meta}>Analyzing…</Text> : null}
@@ -405,11 +445,13 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
                 match={entry.match}
                 skill={entry.skill}
                 agentLabel={entry.label}
+                sectionKey="relevant"
                 compact={layout.compact}
                 copied={copied === entry.match.name}
                 styles={styles}
                 accent={theme.colors.accent}
                 onCopy={() => void copySkill(entry.match.name)}
+                onTooltipOpenChange={onTooltipOpenChange}
               />
             ))
           ) : (
@@ -453,7 +495,7 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
           ? groups.map((group) => {
               const open = openCategories.has(group.category);
               return (
-                <View key={group.category}>
+                <View key={group.category} style={sectionLifted(`category:${group.category}`) ? styles.sectionLifted : undefined}>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`${group.category}, ${group.skills.length} skills`}
@@ -471,8 +513,10 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
                         <CatalogRow
                           key={skill.name}
                           skill={skill}
+                          sectionKey={`category:${group.category}`}
                           styles={styles}
                           onCopy={() => void copySkill(skill.name)}
+                          onTooltipOpenChange={onTooltipOpenChange}
                         />
                       ))
                     : null}
