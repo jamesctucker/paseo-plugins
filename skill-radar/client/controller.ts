@@ -3,7 +3,7 @@ import { copyText } from "@getpaseo/plugin/client/react-native";
 import {
   CLASSIFY_DEBOUNCE_MS,
   CONTEXT_MESSAGES,
-  CONFIDENCE_THRESHOLD,
+  PILL_THRESHOLD,
   PILL_TTL_MS,
   classifyContext,
 } from "../shared/contracts";
@@ -57,7 +57,7 @@ export function startRadar(client: PluginClientContext): () => void {
 
     const state = agentRadarState(agentId);
     const top = state.status === "ready" ? state.matches[0] : undefined;
-    if (!top || top.confidence < CONFIDENCE_THRESHOLD) {
+    if (!top || top.confidence < PILL_THRESHOLD) {
       if (pill.hideTimer) clearTimeout(pill.hideTimer);
       pill.hideTimer = null;
       pill.copied = false;

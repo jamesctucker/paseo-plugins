@@ -4,7 +4,7 @@ import { Icon, ScrollView, copyText, useToast } from "@getpaseo/plugin/client/re
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LayoutAnimation, Pressable, Text, View } from "react-native";
 import type { z } from "zod";
-import { CONFIDENCE_THRESHOLD, listSkills, skillEntrySchema } from "../shared/contracts";
+import { PANEL_THRESHOLD, listSkills, skillEntrySchema } from "../shared/contracts";
 import { dismissBanner, useRadar, type RadarMatch } from "./store";
 
 type SkillEntry = z.infer<typeof skillEntrySchema>;
@@ -392,7 +392,7 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
     for (const [agentId, state] of Object.entries(radar.states)) {
       if (state.workspaceId !== workspaceId || state.status !== "ready") continue;
       const match = state.matches[0];
-      if (!match || match.confidence < CONFIDENCE_THRESHOLD) continue;
+      if (!match || match.confidence < PANEL_THRESHOLD) continue;
       rows.push({
         agentId,
         label: radar.labels[agentId] ?? "Untitled agent",

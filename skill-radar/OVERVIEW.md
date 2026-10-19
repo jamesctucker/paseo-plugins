@@ -4,7 +4,7 @@ Skill Radar shows which of your agent skills fit the work in front of you. You k
 
 ## How it works
 
-It reads the last five user messages from the most recently active agent in the workspace, sends them together with the skill catalog to a decision model, and ranks the catalog by probability. The Explorer panel shows the top matches and the full catalog. A skill is suggested only at 70 percent confidence or higher, in both the panel and the composer pill.
+It reads the last five user messages from the most recently active agent in the workspace, sends them together with the skill catalog to a decision model, and ranks the catalog by probability. The Explorer panel shows the top matches and the full catalog. The panel shows matches at 50 percent confidence or higher. The composer pill is stricter and only appears at 70 percent.
 
 Classification runs five seconds after a message settles, so typing does not trigger a request. A repeated classification of the same conversation comes from a one minute cache.
 
