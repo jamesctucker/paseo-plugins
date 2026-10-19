@@ -11,6 +11,11 @@ import { agentRadarState, forgetAgent, patchAgentState, setAgentLabel } from "./
 
 const RECENT_AGENT_WINDOW_MS = 12 * 60 * 60 * 1000;
 const WATCHED_AGENT_LIMIT = 6;
+/**
+ * Teardown is delayed so an agent bouncing around the top-6 / 12h boundary keeps its
+ * watcher and its last classification instead of re-seeding and re-billing on every return.
+ */
+const UNWATCH_GRACE_MS = 5 * 60 * 1000;
 
 interface DirectoryAgent {
   id: string;
@@ -48,6 +53,7 @@ export function startRadar(client: PluginClientContext): () => void {
   const lifetime = new AbortController();
   const watchers = new Map<string, Watcher>();
   const pills = new Map<string, Pill>();
+  const pendingUnwatches = new Map<string, ReturnType<typeof setTimeout>>();
 
   const stopped = () => lifetime.signal.aborted;
 
@@ -174,15 +180,15 @@ export function startRadar(client: PluginClientContext): () => void {
         .map((item) => item.text.trim())
         .filter(Boolean)
         .slice(-CONTEXT_MESSAGES);
+      // After a subscription restore the old matches describe old context, so a changed
+      // history must reclassify rather than keep showing a stale suggestion indefinitely.
+      const changed = messages.join(" ") !== watcher.messages.join(" ");
       watcher.messages = messages;
       watcher.seeded = true;
-      if (autoClassify && messages.length > 0) {
-          patchAgentState(
-          watcher.agentId,
-          { status: "analyzing", matches: [], reason: null },
-          watcher.workspaceId,
-        );
-        scheduleClassify(watcher, 0);
+      if (messages.length > 0 && (autoClassify || changed)) {
+        patchAgentState(watcher.agentId, { status: "analyzing", matches: [], reason: null }, watcher.workspaceId);
+        // Restores take the debounce so a flapping connection cannot fire a call per reconnect.
+        scheduleClassify(watcher, autoClassify ? 0 : CLASSIFY_DEBOUNCE_MS);
       }
     } catch {
       // A closed or unsubscribed agent simply has no history to read.
@@ -209,6 +215,11 @@ export function startRadar(client: PluginClientContext): () => void {
   const watch = (agent: DirectoryAgent, autoClassify: boolean) => {
     if (!agent.workspaceId || stopped()) return;
     if (agent.title) setAgentLabel(agent.id, agent.title);
+    const pending = pendingUnwatches.get(agent.id);
+    if (pending) {
+      clearTimeout(pending);
+      pendingUnwatches.delete(agent.id);
+    }
     if (watchers.has(agent.id)) return;
     ensurePill(agent.id, agent.workspaceId);
 
@@ -275,7 +286,14 @@ export function startRadar(client: PluginClientContext): () => void {
 
     const keep = new Set(eligibleAgents.map((agent) => agent.id));
     for (const agentId of [...watchers.keys()]) {
-      if (!keep.has(agentId)) unwatch(agentId);
+      if (keep.has(agentId) || pendingUnwatches.has(agentId)) continue;
+      pendingUnwatches.set(
+        agentId,
+        setTimeout(() => {
+          pendingUnwatches.delete(agentId);
+          if (!stopped()) unwatch(agentId);
+        }, UNWATCH_GRACE_MS),
+      );
     }
     // Every watched tab needs a row in "Relevant now", so seed and classify each one once.
     for (const agent of eligibleAgents) watch(agent, true);
@@ -299,6 +317,11 @@ export function startRadar(client: PluginClientContext): () => void {
             return;
           }
           directory.delete(update.agentId);
+          const pending = pendingUnwatches.get(update.agentId);
+          if (pending) {
+            clearTimeout(pending);
+            pendingUnwatches.delete(update.agentId);
+          }
           unwatch(update.agentId);
         },
       });
@@ -310,6 +333,8 @@ export function startRadar(client: PluginClientContext): () => void {
 
   return () => {
     lifetime.abort();
+    for (const timer of pendingUnwatches.values()) clearTimeout(timer);
+    pendingUnwatches.clear();
     for (const watcher of watchers.values()) {
       if (watcher.timer) clearTimeout(watcher.timer);
       void watcher.release?.release().catch(() => {});

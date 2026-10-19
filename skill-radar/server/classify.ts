@@ -19,10 +19,19 @@ const REQUEST_TIMEOUT_MS = 9_000;
 const RESULT_CACHE_MS = 60_000;
 const NO_MATCH = "none";
 const DESCRIPTION_CHARS = 180;
+/**
+ * Clef is served on Workers AI, which truncates long text state, so oversized pastes
+ * (log dumps, file contents) must be cut here before they silently eat the catalog field.
+ */
+const MAX_MESSAGE_CHARS = 2_000;
+const MAX_CONVERSATION_CHARS = 10_000;
+const TRUNCATION_MARKER = "\n…[truncated]…\n";
 
 class UnavailableError extends Error {}
 
 const resultCache = new Map<string, { result: Classification; at: number }>();
+/** Concurrent identical requests share one upstream call instead of double-billing it. */
+const inFlight = new Map<string, Promise<Classification>>();
 
 function modelName(): string {
   return process.env.SKILL_RADAR_MODEL?.trim() || DEFAULT_MODEL;
@@ -38,8 +47,11 @@ async function apiKey(): Promise<string | null> {
 
   try {
     const raw = await readFile(path.join(homedir(), ".local", "share", "opencode", "auth.json"), "utf8");
-    const stored = (JSON.parse(raw) as { openrouter?: { key?: unknown } }).openrouter?.key;
-    return typeof stored === "string" && stored.trim() ? stored.trim() : null;
+    // `opencode auth login` stores either an API key ({type:"api",key}) or OAuth tokens
+    // ({type:"oauth",access,refresh}); both work as Bearer credentials for OpenRouter.
+    const entry = (JSON.parse(raw) as { openrouter?: { key?: unknown; access?: unknown } }).openrouter;
+    const token = typeof entry?.key === "string" ? entry.key : typeof entry?.access === "string" ? entry.access : null;
+    return token?.trim() ? token.trim() : null;
   } catch {
     return null;
   }
@@ -63,54 +75,147 @@ function buildCriteria(catalog: SkillCatalog): Record<string, string> {
   return criteria;
 }
 
+/**
+ * Middle-truncate so a giant paste keeps its opening intent and closing question —
+ * the tail is where the current ask usually lives.
+ */
+function truncateMiddle(message: string): string {
+  if (message.length <= MAX_MESSAGE_CHARS) return message;
+  return `${message.slice(0, 1200)}${TRUNCATION_MARKER}${message.slice(-700)}`;
+}
+
+/** The newest messages carry the signal, so the oldest drop first when the budget is tight. */
+function fitConversation(messages: string[]): string[] {
+  const kept: string[] = [];
+  let total = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (kept.length > 0 && total + message.length > MAX_CONVERSATION_CHARS) break;
+    kept.unshift(message);
+    total += message.length;
+  }
+  return kept;
+}
+
 export async function classify(messages: string[]): Promise<Classification> {
   const catalog = await scanSkills();
-  const cleaned = messages.map((message) => message.trim()).filter(Boolean);
+  const cleaned = fitConversation(messages.map((message) => truncateMiddle(message.trim())).filter(Boolean));
   if (cleaned.length === 0 || catalog.skills.length === 0) {
     return { status: "ok", reason: null, matches: [], classifiedAt: Date.now() };
   }
 
+  // The model belongs in the key: probabilities are not portable across models.
   const key = createHash("sha256")
-    .update(`${catalogFingerprint(catalog)}\u0000${cleaned.join("\u0000")}`)
+    .update(`${modelName()} ${catalogFingerprint(catalog)} ${JSON.stringify(cleaned)}`)
     .digest("hex")
     .slice(0, 24);
   const cached = resultCache.get(key);
   if (cached && Date.now() - cached.at < RESULT_CACHE_MS) return cached.result;
 
-  let result: Classification;
+  const pending = inFlight.get(key);
+  if (pending) return pending;
+
+  const task = runClassification(key, cleaned, catalog);
+  inFlight.set(key, task);
   try {
-    result = {
+    return await task;
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
+async function runClassification(key: string, messages: string[], catalog: SkillCatalog): Promise<Classification> {
+  try {
+    const result: Classification = {
       status: "ok",
       reason: null,
-      matches: await requestClassification(cleaned, catalog),
+      matches: await requestClassification(messages, catalog),
       classifiedAt: Date.now(),
     };
+    resultCache.set(key, { result, at: Date.now() });
+    if (resultCache.size > 100) resultCache.delete(resultCache.keys().next().value as string);
+    return result;
   } catch (error) {
+    // Failures are deliberately not cached: a transient 5xx or timeout must not replay
+    // for a minute while the client has no other retry path for the same messages.
     const reason =
       error instanceof UnavailableError
         ? error.message
         : error instanceof Error && error.name === "AbortError"
           ? "Classification timed out"
           : "Classification failed";
-    result = { status: "unavailable", reason, matches: [], classifiedAt: Date.now() };
+    return { status: "unavailable", reason, matches: [], classifiedAt: Date.now() };
   }
-
-  resultCache.set(key, { result, at: Date.now() });
-  if (resultCache.size > 100) resultCache.delete(resultCache.keys().next().value as string);
-  return result;
 }
 
-function parseProbabilities(raw: unknown): Record<string, number> {
+type ChoiceAnswer = {
+  /** The model's explicit decision; more authoritative than reading the probabilities ourselves. */
+  choice: string | null;
+  /** Distribution concentration reported by the model, independent of catalog size. */
+  confidence: number | null;
+  probabilities: Record<string, number>;
+};
+
+function parseChoiceAnswer(raw: unknown): ChoiceAnswer {
   if (!raw || typeof raw !== "object") throw new Error("Malformed decision response");
-  const answers = raw as { answers?: Record<string, { probabilities?: Record<string, unknown> }> };
-  const probabilities = answers.answers?.skill?.probabilities;
+  const answer = (raw as { answers?: Record<string, unknown> }).answers?.skill;
+  if (!answer || typeof answer !== "object") throw new Error("Malformed decision response");
+  const { choice, confidence, probabilities } = answer as {
+    choice?: unknown;
+    confidence?: unknown;
+    probabilities?: unknown;
+  };
   if (!probabilities || typeof probabilities !== "object") throw new Error("Malformed decision response");
 
   const scores: Record<string, number> = {};
   for (const [name, value] of Object.entries(probabilities)) {
     if (typeof value === "number" && Number.isFinite(value)) scores[name] = value;
   }
-  return scores;
+  return {
+    choice: typeof choice === "string" ? choice : null,
+    confidence: typeof confidence === "number" && Number.isFinite(confidence) ? confidence : null,
+    probabilities: scores,
+  };
+}
+
+const clampPercent = (value: number): number => Math.max(0, Math.min(100, value));
+
+function rankMatches(answer: ChoiceAnswer, catalog: SkillCatalog): Match[] {
+  const known = new Set(catalog.skills.map((skill) => skill.name));
+  const byProbability = Object.entries(answer.probabilities).sort((a, b) => b[1] - a[1]);
+
+  let top: string | null =
+    answer.choice && (answer.choice === NO_MATCH || known.has(answer.choice)) ? answer.choice : null;
+  if (!top) top = byProbability[0]?.[0] ?? null;
+
+  // A none decision vetoes every skill, however strong an individual probability looks.
+  if (!top || top === NO_MATCH) return [];
+
+  if (!known.has(top)) {
+    // A hallucinated explicit choice falls back to the strongest real option —
+    // unless none out-scores it, which is the same veto as an explicit none.
+    const bestKnown = byProbability.find(([name]) => known.has(name));
+    const noneProbability = answer.probabilities[NO_MATCH] ?? 0;
+    if (!bestKnown || bestKnown[1] <= noneProbability) return [];
+    top = bestKnown[0];
+  }
+
+  // Prefer the model's confidence for the top score: raw option probability dilutes
+  // as the catalog grows, so it cannot carry the panel/pill thresholds on its own.
+  const topScore =
+    answer.confidence !== null
+      ? clampPercent(Math.round(answer.confidence * 100))
+      : clampPercent(Math.round((answer.probabilities[top] ?? 0) * 100));
+
+  const matches: Match[] = [{ name: top, confidence: topScore }];
+  for (const [name, probability] of byProbability) {
+    if (matches.length >= MAX_SUGGESTIONS) break;
+    if (name === top || name === NO_MATCH || !known.has(name)) continue;
+    const confidence = clampPercent(Math.round(probability * 100));
+    if (confidence <= 0) continue;
+    matches.push({ name, confidence });
+  }
+  return matches;
 }
 
 async function requestClassification(messages: string[], catalog: SkillCatalog): Promise<Match[]> {
@@ -159,16 +264,7 @@ async function requestClassification(messages: string[], catalog: SkillCatalog):
       throw new UnavailableError(`OpenRouter returned ${response.status}${detail ? `: ${detail}` : ""}`);
     }
 
-    const probabilities = parseProbabilities(await response.json());
-    return Object.entries(probabilities)
-      .filter(([name]) => name !== NO_MATCH && catalog.skills.some((skill) => skill.name === name))
-      .map(([name, probability]) => ({
-        name,
-        confidence: Math.max(0, Math.min(100, Math.round(probability * 100))),
-      }))
-      .filter((match) => match.confidence > 0)
-      .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, MAX_SUGGESTIONS);
+    return rankMatches(parseChoiceAnswer(await response.json()), catalog);
   } finally {
     clearTimeout(timeout);
   }
