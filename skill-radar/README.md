@@ -27,7 +27,7 @@ The model call uses OpenRouter's `POST /api/alpha/decisions` endpoint. Clef is a
 
 | Surface | Behavior |
 |---------|----------|
-| Explorer panel (right side) | Ranked "Relevant now" suggestions and a collapsible catalog of every skill |
+| Explorer panel (right side) | Ranked "Relevant now" suggestions for the focused agent tab, plus a collapsible catalog of every skill |
 | Composer pill | Top skill at or above 70 percent confidence, per agent |
 | Command Center | "Open Skill Radar" |
 
