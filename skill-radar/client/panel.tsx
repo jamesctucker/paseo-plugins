@@ -1,16 +1,15 @@
-import type { PluginAgentPanelProps } from "@getpaseo/plugin/client";
+import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, ScrollView, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LayoutAnimation, Pressable, Text, View } from "react-native";
 import type { z } from "zod";
 import { listSkills, skillEntrySchema, SUGGESTION_FLOOR } from "../shared/contracts";
-import { requestAgentSuggestions } from "./controller";
-import { dismissBanner, useRadar, type RadarMatch } from "./store";
+import { dismissBanner, stateForWorkspace, useRadar, type RadarMatch } from "./store";
 
 type SkillEntry = z.infer<typeof skillEntrySchema>;
 type Catalog = z.infer<typeof listSkills.output>;
-type Theme = PluginAgentPanelProps["theme"];
+type Theme = PluginWorkspacePanelProps["theme"];
 
 type CatalogState =
   | { status: "loading" }
@@ -287,7 +286,7 @@ function CatalogRow({ skill, styles, onCopy }: CatalogRowProps) {
   );
 }
 
-export function SkillRadarPanel({ theme, layout, agentId, workspaceId }: PluginAgentPanelProps) {
+export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspacePanelProps) {
   const radar = useRadar();
   const toast = useToast();
   const fetchCatalog = useRpc(listSkills);
@@ -313,11 +312,6 @@ export function SkillRadarPanel({ theme, layout, agentId, workspaceId }: PluginA
   }, [load]);
 
   useEffect(() => {
-    // Paseo remounts or re-renders this panel with the focused agent when the user switches tabs.
-    requestAgentSuggestions(agentId, workspaceId);
-  }, [agentId, workspaceId]);
-
-  useEffect(() => {
     if (!copied) return;
     const timer = setTimeout(() => setCopied(null), 2_000);
     return () => clearTimeout(timer);
@@ -339,7 +333,7 @@ export function SkillRadarPanel({ theme, layout, agentId, workspaceId }: PluginA
   const styles = useMemo(() => buildStyles(theme, layout.compact), [theme, layout.compact]);
   const skills = useMemo(() => (catalog.status === "ready" ? catalog.catalog.skills : []), [catalog]);
   const groups = useMemo(() => groupSkills(skills), [skills]);
-  const activeState = radar.states[agentId] ?? null;
+  const activeState = stateForWorkspace(radar, workspaceId);
   const suggestions = (activeState?.matches ?? []).filter((match) => match.confidence >= SUGGESTION_FLOOR);
   const showBanner = activeState?.status === "unavailable" && !radar.bannerDismissed;
 
