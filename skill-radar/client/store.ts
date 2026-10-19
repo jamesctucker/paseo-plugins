@@ -11,27 +11,24 @@ export interface AgentRadarState {
   status: RadarStatus;
   matches: RadarMatch[];
   reason: string | null;
+  workspaceId: string | null;
   updatedAt: number;
 }
 
 export interface RadarSnapshot {
-  /** The agent whose conversation drove the latest classification. */
-  activeAgentId: string | null;
   states: Record<string, AgentRadarState>;
   bannerDismissed: boolean;
 }
 
-const EMPTY: AgentRadarState = { status: "idle", matches: [], reason: null, updatedAt: 0 };
+const EMPTY: AgentRadarState = { status: "idle", matches: [], reason: null, workspaceId: null, updatedAt: 0 };
 
 let states = new Map<string, AgentRadarState>();
-let activeAgentId: string | null = null;
 let bannerDismissed = false;
 let snapshot: RadarSnapshot = build();
 const listeners = new Set<() => void>();
 
 function build(): RadarSnapshot {
   return {
-    activeAgentId,
     states: Object.fromEntries(states),
     bannerDismissed,
   };
@@ -65,16 +62,28 @@ export function setAgentState(agentId: string, next: AgentRadarState) {
   emit();
 }
 
-export function patchAgentState(agentId: string, patch: Partial<AgentRadarState>) {
+export function patchAgentState(agentId: string, patch: Partial<AgentRadarState>, workspaceId?: string) {
   const current = states.get(agentId) ?? EMPTY;
-  states.set(agentId, { ...current, ...patch, updatedAt: Date.now() });
+  states.set(agentId, {
+    ...current,
+    ...patch,
+    workspaceId: workspaceId ?? current.workspaceId,
+    updatedAt: Date.now(),
+  });
   emit();
 }
 
-export function setActiveAgent(agentId: string) {
-  if (activeAgentId === agentId) return;
-  activeAgentId = agentId;
-  emit();
+/**
+ * The Explorer panel is workspace-scoped, so it follows the most recently active agent in
+ * that workspace rather than whichever agent happened to classify last anywhere.
+ */
+export function stateForWorkspace(snapshot: RadarSnapshot, workspaceId: string): AgentRadarState | null {
+  let best: AgentRadarState | null = null;
+  for (const state of Object.values(snapshot.states)) {
+    if (state.workspaceId !== workspaceId) continue;
+    if (!best || state.updatedAt > best.updatedAt) best = state;
+  }
+  return best;
 }
 
 export function dismissBanner() {
@@ -85,15 +94,11 @@ export function dismissBanner() {
 
 export function forgetAgent(agentId: string) {
   if (!states.delete(agentId)) return;
-  if (activeAgentId === agentId) {
-    activeAgentId = null;
-  }
   emit();
 }
 
 export function resetRadar() {
   states = new Map();
-  activeAgentId = null;
   bannerDismissed = false;
   emit();
 }

@@ -1,11 +1,11 @@
-import type { PluginScreenProps } from "@getpaseo/plugin/client";
+import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, ScrollView, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LayoutAnimation, Pressable, Text, View } from "react-native";
 import type { z } from "zod";
 import { listSkills, skillEntrySchema, SUGGESTION_FLOOR } from "../shared/contracts";
-import { dismissBanner, useRadar } from "./store";
+import { dismissBanner, stateForWorkspace, useRadar } from "./store";
 
 type SkillEntry = z.infer<typeof skillEntrySchema>;
 type Catalog = z.infer<typeof listSkills.output>;
@@ -45,7 +45,7 @@ function groupSkills(skills: SkillEntry[]) {
   return groups;
 }
 
-export function SkillRadarScreen({ theme, layout }: PluginScreenProps) {
+export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspacePanelProps) {
   const radar = useRadar();
   const toast = useToast();
   const fetchCatalog = useRpc(listSkills);
@@ -199,7 +199,7 @@ export function SkillRadarScreen({ theme, layout }: PluginScreenProps) {
 
   const skills = useMemo(() => (catalog.status === "ready" ? catalog.catalog.skills : []), [catalog]);
   const groups = useMemo(() => groupSkills(skills), [skills]);
-  const activeState = radar.activeAgentId ? radar.states[radar.activeAgentId] : undefined;
+  const activeState = stateForWorkspace(radar, workspaceId);
   const suggestions = (activeState?.matches ?? []).filter((match) => match.confidence >= SUGGESTION_FLOOR);
   const showBanner = activeState?.status === "unavailable" && !radar.bannerDismissed;
 
@@ -372,4 +372,4 @@ export function SkillRadarScreen({ theme, layout }: PluginScreenProps) {
   );
 }
 
-export default SkillRadarScreen;
+export default SkillRadarPanel;

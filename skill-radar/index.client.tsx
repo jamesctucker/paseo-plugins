@@ -1,30 +1,25 @@
-import type { PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
-import { SidebarRow } from "@getpaseo/plugin/client/ui";
+import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { startRadar } from "./client/controller";
-import { SkillRadarScreen } from "./client/screen";
-
-function SkillRadarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
-  return (
-    <SidebarRow
-      icon="Radar"
-      active={currentScreen?.screenId === "radar"}
-      onPress={() => openScreen({ screenId: "radar" })}
-    />
-  );
-}
+import { SkillRadarPanel } from "./client/panel";
 
 export default function contribute(client: PluginClientContext) {
-  client.addScreen({ id: "radar", title: "Skill Radar", Component: SkillRadarScreen });
-  client.addSidebarHeaderItem({ id: "radar", title: "Skill Radar", Component: SkillRadarItem });
+  client.addWorkspacePanel({
+    id: "radar",
+    title: "Skill Radar",
+    icon: "Radar",
+    context: "workspace",
+    locations: ["explorer"],
+    Component: SkillRadarPanel,
+  });
 
   client.addCommandCenterItem({
     id: "open-skill-radar",
     title: "Open Skill Radar",
     icon: "Radar",
     keywords: ["skills", "suggestions", "classify", "recall"],
-    context: "global",
-    onSelect({ openScreen }) {
-      openScreen({ screenId: "radar" });
+    context: "workspace",
+    onSelect({ openPanel }) {
+      openPanel("radar", { location: "explorer" });
     },
   });
 
