@@ -7,7 +7,7 @@ import {
   PILL_TTL_MS,
   classifyContext,
 } from "../shared/contracts";
-import { agentRadarState, forgetAgent, patchAgentState, setActiveAgent } from "./store";
+import { agentRadarState, forgetAgent, patchAgentState } from "./store";
 
 const RECENT_AGENT_WINDOW_MS = 12 * 60 * 60 * 1000;
 const AUTO_CLASSIFY_WINDOW_MS = 2 * 60 * 60 * 1000;
@@ -127,20 +127,27 @@ export function startRadar(client: PluginClientContext): () => void {
       // A newer message arrived while this call was in flight; its own timer will handle it.
       if (watcher.messages.join("\u0000") !== messages.join("\u0000")) return;
 
-      setActiveAgent(watcher.agentId);
-      patchAgentState(watcher.agentId, {
-        status: result.status === "ok" ? "ready" : "unavailable",
-        matches: result.matches,
-        reason: result.reason,
-      });
+      patchAgentState(
+        watcher.agentId,
+        {
+          status: result.status === "ok" ? "ready" : "unavailable",
+          matches: result.matches,
+          reason: result.reason,
+        },
+        watcher.workspaceId,
+      );
       refreshPill(watcher.agentId);
     } catch {
       if (stopped()) return;
-      patchAgentState(watcher.agentId, {
-        status: "unavailable",
-        matches: [],
-        reason: "Classification request failed",
-      });
+      patchAgentState(
+        watcher.agentId,
+        {
+          status: "unavailable",
+          matches: [],
+          reason: "Classification request failed",
+        },
+        watcher.workspaceId,
+      );
       refreshPill(watcher.agentId);
     }
   };
@@ -151,8 +158,7 @@ export function startRadar(client: PluginClientContext): () => void {
     watcher.messages = [...watcher.messages, message].slice(-CONTEXT_MESSAGES);
     watcher.lastActivityAt = Date.now();
 
-    setActiveAgent(watcher.agentId);
-    patchAgentState(watcher.agentId, { status: "analyzing", matches: [], reason: null });
+    patchAgentState(watcher.agentId, { status: "analyzing", matches: [], reason: null }, watcher.workspaceId);
     refreshPill(watcher.agentId);
     scheduleClassify(watcher, CLASSIFY_DEBOUNCE_MS);
   };
@@ -171,8 +177,11 @@ export function startRadar(client: PluginClientContext): () => void {
       watcher.messages = messages;
       watcher.seeded = true;
       if (autoClassify && messages.length > 0) {
-        setActiveAgent(watcher.agentId);
-        patchAgentState(watcher.agentId, { status: "analyzing", matches: [], reason: null });
+          patchAgentState(
+          watcher.agentId,
+          { status: "analyzing", matches: [], reason: null },
+          watcher.workspaceId,
+        );
         scheduleClassify(watcher, 0);
       }
     } catch {
