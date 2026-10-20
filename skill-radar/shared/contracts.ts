@@ -34,6 +34,8 @@ export const classifyContext = defineRpc({
         confidence: z.number().int().min(0).max(100),
       }),
     ),
+    /** P(session is wrapping up) from the noul question; null when the model omitted it. */
+    windingDown: z.number().int().min(0).max(100).nullable(),
     classifiedAt: z.number(),
   }),
 });
@@ -52,3 +54,13 @@ export const CONTEXT_MESSAGES = 5;
 export const CLASSIFY_DEBOUNCE_MS = 5_000;
 /** A pill outlives the classification that created it, but not indefinitely. */
 export const PILL_TTL_MS = 30_000;
+/**
+ * Closing skills fire on session state (the user stops), not message content, so the
+ * content classifier alone cannot surface them. Prototype: a fixed name list; the
+ * production path is a `closing: true` frontmatter convention once this proves out.
+ */
+export const CLOSING_SKILLS = ["session-handoff", "retro"];
+/** P(winding down) at or above this promotes a closing skill. Prototype value — probe before shipping. */
+export const WINDING_DOWN_THRESHOLD = 60;
+/** One quiet-period reclassification so the wrap-up moment itself becomes a trigger. */
+export const INACTIVITY_NUDGE_MS = 60 * 60 * 1000;

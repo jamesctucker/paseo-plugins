@@ -24,12 +24,16 @@ async function fixture() {
 
 function decisionResponse(
   probabilities: Record<string, number>,
-  extra: { choice?: string; confidence?: number } = {},
+  extra: { choice?: string; confidence?: number; windingDown?: number } = {},
 ) {
+  const { windingDown, ...choiceExtra } = extra;
   return new Response(
     JSON.stringify({
       model: "cloudflare/clef-flash",
-      answers: { skill: { type: "choice", probabilities, ...extra } },
+      answers: {
+        skill: { type: "choice", probabilities, ...choiceExtra },
+        ...(windingDown === undefined ? {} : { winding_down: { type: "noul", noul: windingDown } }),
+      },
     }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
@@ -82,6 +86,7 @@ describe("classification", () => {
     expect(body.model).toBe("cloudflare/clef-flash");
     expect(body.provider).toEqual({ order: ["primeintellect"], allow_fallbacks: false });
     expect(body.questions.skill.type).toBe("choice");
+    expect(body.questions.winding_down.type).toBe("noul");
     expect(Object.keys(body.questions.skill.criteria)).toContain("diagnose");
   });
 
@@ -196,6 +201,38 @@ describe("classification", () => {
     await classify(["a model keyed conversation"]);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("promotes a closing skill to the top when the session is winding down", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => decisionResponse({ diagnose: 0.6, retro: 0.2, none: 0.05 }, { windingDown: 0.8 })),
+    );
+
+    const result = await classify(["final push is done, just closing up now"]);
+    expect(result.windingDown).toBe(80);
+    expect(result.matches[0]).toEqual({ name: "retro", confidence: 80 });
+  });
+
+  it("promotes a closing skill even when the content choice is none", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => decisionResponse({ none: 0.5, retro: 0.25, diagnose: 0.2 }, { windingDown: 0.75 })),
+    );
+
+    const result = await classify(["ok that is everything pushed, thanks"]);
+    expect(result.matches[0]).toEqual({ name: "retro", confidence: 75 });
+  });
+
+  it("leaves the content ranking alone when the session is not winding down", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => decisionResponse({ diagnose: 0.6, retro: 0.2, none: 0.05 }, { windingDown: 0.3 })),
+    );
+
+    const result = await classify(["halfway through debugging this crash"]);
+    expect(result.windingDown).toBe(30);
+    expect(result.matches[0]).toEqual({ name: "diagnose", confidence: 60 });
   });
 
   it("middle-truncates oversized messages instead of sending unbounded state", async () => {

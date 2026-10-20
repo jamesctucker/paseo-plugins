@@ -12,7 +12,8 @@ export default function contribute(server: PluginServerContext) {
   server.handle(classifyContext, async ({ messages }) => {
     const result = await classify(messages);
     const ranked = result.matches.map((match) => `${match.name} ${match.confidence}%`).join(", ");
-    console.log(`Skill Radar: classify ${result.status}${ranked ? ` → ${ranked}` : ""}`);
+    const winding = result.windingDown !== null ? ` (winding ${result.windingDown}%)` : "";
+    console.log(`Skill Radar: classify ${result.status}${ranked ? ` → ${ranked}` : ""}${winding}`);
     return result;
   });
 

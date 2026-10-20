@@ -3,6 +3,7 @@ import { copyText } from "@getpaseo/plugin/client/react-native";
 import {
   CLASSIFY_DEBOUNCE_MS,
   CONTEXT_MESSAGES,
+  INACTIVITY_NUDGE_MS,
   PILL_THRESHOLD,
   PILL_TTL_MS,
   classifyContext,
@@ -37,6 +38,9 @@ interface Watcher {
   messages: string[];
   lastActivityAt: number;
   timer: ReturnType<typeof setTimeout> | null;
+  /** One quiet-period reclassification per stretch of inactivity; reset by any user message. */
+  nudgeTimer: ReturnType<typeof setTimeout> | null;
+  nudged: boolean;
   release: { release(): Promise<void> } | null;
   seeded: boolean;
 }
@@ -123,6 +127,18 @@ export function startRadar(client: PluginClientContext): () => void {
     }, delay);
   };
 
+  const scheduleNudge = (watcher: Watcher) => {
+    if (watcher.nudged || stopped()) return;
+    if (watcher.nudgeTimer) clearTimeout(watcher.nudgeTimer);
+    watcher.nudgeTimer = setTimeout(() => {
+      watcher.nudgeTimer = null;
+      watcher.nudged = true;
+      // The wrap-up moment is invisible to message-triggered classification; one
+      // quiet-period reclassification lets the winding-down signal surface closing skills.
+      void runClassify(watcher);
+    }, INACTIVITY_NUDGE_MS);
+  };
+
   const runClassify = async (watcher: Watcher) => {
     if (stopped() || watcher.messages.length === 0) return;
     const messages = [...watcher.messages];
@@ -143,6 +159,7 @@ export function startRadar(client: PluginClientContext): () => void {
         watcher.workspaceId,
       );
       refreshPill(watcher.agentId);
+      scheduleNudge(watcher);
     } catch {
       if (stopped()) return;
       patchAgentState(
@@ -163,6 +180,12 @@ export function startRadar(client: PluginClientContext): () => void {
     if (!message) return;
     watcher.messages = [...watcher.messages, message].slice(-CONTEXT_MESSAGES);
     watcher.lastActivityAt = Date.now();
+    // New activity ends the quiet period: the next one earns its own nudge.
+    if (watcher.nudgeTimer) {
+      clearTimeout(watcher.nudgeTimer);
+      watcher.nudgeTimer = null;
+    }
+    watcher.nudged = false;
 
     patchAgentState(watcher.agentId, { status: "analyzing", matches: [], reason: null }, watcher.workspaceId);
     refreshPill(watcher.agentId);
@@ -229,6 +252,8 @@ export function startRadar(client: PluginClientContext): () => void {
       messages: [],
       lastActivityAt: activityOf(agent),
       timer: null,
+      nudgeTimer: null,
+      nudged: false,
       release: null,
       seeded: false,
     };
@@ -258,6 +283,7 @@ export function startRadar(client: PluginClientContext): () => void {
     const watcher = watchers.get(agentId);
     if (!watcher) return;
     if (watcher.timer) clearTimeout(watcher.timer);
+    if (watcher.nudgeTimer) clearTimeout(watcher.nudgeTimer);
     void watcher.release?.release().catch(() => {});
     watchers.delete(agentId);
 
@@ -337,6 +363,7 @@ export function startRadar(client: PluginClientContext): () => void {
     pendingUnwatches.clear();
     for (const watcher of watchers.values()) {
       if (watcher.timer) clearTimeout(watcher.timer);
+      if (watcher.nudgeTimer) clearTimeout(watcher.nudgeTimer);
       void watcher.release?.release().catch(() => {});
     }
     watchers.clear();
