@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { MAX_SUGGESTIONS } from "../shared/contracts";
+import { CLOSING_SKILLS, MAX_SUGGESTIONS, WINDING_DOWN_THRESHOLD } from "../shared/contracts";
 import { scanSkills, type SkillCatalog } from "./skills";
 
 type Match = { name: string; confidence: number };
@@ -10,8 +10,11 @@ type Classification = {
   status: "ok" | "unavailable";
   reason: string | null;
   matches: Match[];
+  windingDown: number | null;
   classifiedAt: number;
 };
+
+const CLOSING_SKILL_SET = new Set<string>(CLOSING_SKILLS);
 
 const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 /**
@@ -108,7 +111,7 @@ export async function classify(messages: string[]): Promise<Classification> {
   const catalog = await scanSkills();
   const cleaned = fitConversation(messages.map((message) => truncateMiddle(message.trim())).filter(Boolean));
   if (cleaned.length === 0 || catalog.skills.length === 0) {
-    return { status: "ok", reason: null, matches: [], classifiedAt: Date.now() };
+    return { status: "ok", reason: null, matches: [], windingDown: null, classifiedAt: Date.now() };
   }
 
   // The model belongs in the key: probabilities are not portable across models.
@@ -133,12 +136,8 @@ export async function classify(messages: string[]): Promise<Classification> {
 
 async function runClassification(key: string, messages: string[], catalog: SkillCatalog): Promise<Classification> {
   try {
-    const result: Classification = {
-      status: "ok",
-      reason: null,
-      matches: await requestClassification(messages, catalog),
-      classifiedAt: Date.now(),
-    };
+    const { matches, windingDown } = await requestClassification(messages, catalog);
+    const result: Classification = { status: "ok", reason: null, matches, windingDown, classifiedAt: Date.now() };
     resultCache.set(key, { result, at: Date.now() });
     if (resultCache.size > 100) resultCache.delete(resultCache.keys().next().value as string);
     return result;
@@ -151,7 +150,7 @@ async function runClassification(key: string, messages: string[], catalog: Skill
         : error instanceof Error && error.name === "AbortError"
           ? "Classification timed out"
           : "Classification failed";
-    return { status: "unavailable", reason, matches: [], classifiedAt: Date.now() };
+    return { status: "unavailable", reason, matches: [], windingDown: null, classifiedAt: Date.now() };
   }
 }
 
@@ -183,6 +182,15 @@ function parseChoiceAnswer(raw: unknown): ChoiceAnswer {
     confidence: typeof confidence === "number" && Number.isFinite(confidence) ? confidence : null,
     probabilities: scores,
   };
+}
+
+/** The noul is optional in the response contract; absence means "no signal", not "no". */
+function parseNoulAnswer(raw: unknown): number | null {
+  if (!raw || typeof raw !== "object") return null;
+  const answer = (raw as { answers?: Record<string, unknown> }).answers?.winding_down;
+  if (!answer || typeof answer !== "object") return null;
+  const noul = (answer as { noul?: unknown }).noul;
+  return typeof noul === "number" && Number.isFinite(noul) ? noul : null;
 }
 
 const clampPercent = (value: number): number => Math.max(0, Math.min(100, value));
@@ -230,7 +238,38 @@ function rankMatches(answer: ChoiceAnswer, catalog: SkillCatalog): Match[] {
   return matches;
 }
 
-async function requestClassification(messages: string[], catalog: SkillCatalog): Promise<Match[]> {
+/**
+ * Closing skills trigger on session state, not message content, so the choice question
+ * alone ranks them last exactly when they matter. When the noul says the session is
+ * wrapping up, promote the strongest closing skill to the top with the noul as its
+ * score. This deliberately bypasses the none veto and the 2x gate: "nothing
+ * content-relevant, but the user is clearly finishing" is precisely their moment.
+ */
+function promoteClosingMatch(
+  matches: Match[],
+  answer: ChoiceAnswer,
+  windingDown: number | null,
+  catalog: SkillCatalog,
+): Match[] {
+  if (windingDown === null || windingDown < WINDING_DOWN_THRESHOLD) return matches;
+
+  const best = Object.entries(answer.probabilities)
+    .filter(([name]) => CLOSING_SKILL_SET.has(name) && catalog.skills.some((skill) => skill.name === name))
+    .sort((a, b) => b[1] - a[1])[0];
+  if (!best) return matches;
+
+  const name = best[0];
+  if (matches[0]?.name === name) return matches;
+  return [{ name, confidence: windingDown }, ...matches.filter((match) => match.name !== name)].slice(
+    0,
+    MAX_SUGGESTIONS,
+  );
+}
+
+async function requestClassification(
+  messages: string[],
+  catalog: SkillCatalog,
+): Promise<{ matches: Match[]; windingDown: number | null }> {
   const key = await apiKey();
   if (!key) {
     throw new UnavailableError("Set OPENROUTER_API_KEY on the daemon or sign in to OpenRouter in OpenCode");
@@ -252,6 +291,13 @@ async function requestClassification(messages: string[], catalog: SkillCatalog):
         instructions:
           "Which catalog skill would most help the user in this coding session right now? Choose none when nothing clearly applies.",
         criteria: buildCriteria(catalog),
+      },
+      // A noul because wrap-up is absolute, not relative to the catalog: it can be
+      // true while no skill matches the content, and false while one does.
+      winding_down: {
+        type: "noul",
+        instructions:
+          "The user is wrapping up this work session: final changes are committed or pushed, they are summarizing or closing out, and they are about to step away rather than start new work.",
       },
     },
   };
@@ -277,7 +323,12 @@ async function requestClassification(messages: string[], catalog: SkillCatalog):
       throw new UnavailableError(`OpenRouter returned ${response.status}${detail ? `: ${detail}` : ""}`);
     }
 
-    return rankMatches(parseChoiceAnswer(await response.json()), catalog);
+    const json: unknown = await response.json();
+    const answer = parseChoiceAnswer(json);
+    const noul = parseNoulAnswer(json);
+    const windingDown = noul === null ? null : clampPercent(Math.round(noul * 100));
+    const matches = promoteClosingMatch(rankMatches(answer, catalog), answer, windingDown, catalog);
+    return { matches, windingDown };
   } finally {
     clearTimeout(timeout);
   }
