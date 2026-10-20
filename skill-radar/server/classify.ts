@@ -259,7 +259,12 @@ function promoteClosingMatch(
   if (!best) return matches;
 
   const name = best[0];
-  if (matches[0]?.name === name) return matches;
+  if (matches[0]?.name === name) {
+    // Already top, but the noul is the stronger signal at wrap-up: choice confidence
+    // dilutes across the closing skills (observed live: 49% while winding was 90%),
+    // which would hide the row under the panel threshold at exactly the right moment.
+    return [{ name, confidence: Math.max(matches[0].confidence, windingDown) }, ...matches.slice(1)];
+  }
   return [{ name, confidence: windingDown }, ...matches.filter((match) => match.name !== name)].slice(
     0,
     MAX_SUGGESTIONS,

@@ -38,9 +38,12 @@ Clicking a skill row or the pill copies the skill name. Hovering (or long pressi
 ```bash
 npm install
 npm run typecheck
+npm test
 paseo plugin reload skill-radar
 paseo plugin logs skill-radar
 ```
+
+`npm run probe` re-runs the threshold probe against the live model (see `scripts/report.md` for the 2026-10-19 baseline); run it before changing the thresholds, the pinned model, or the provider pin. Its `results.json` is gitignored.
 
 Server code scans skill directories and calls OpenRouter. Client code observes agent timelines, debounces five seconds, and owns the Explorer panel and composer pill. The last five user messages are the only context sent.
 

@@ -15,7 +15,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "probe": "bun scripts/probe.ts"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.12.0",
