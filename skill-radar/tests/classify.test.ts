@@ -235,6 +235,16 @@ describe("classification", () => {
     expect(result.matches[0]).toEqual({ name: "diagnose", confidence: 60 });
   });
 
+  it("lifts an already-top closing skill to the winding-down score", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => decisionResponse({ retro: 0.3, diagnose: 0.25, none: 0.1 }, { windingDown: 0.9 })),
+    );
+
+    const result = await classify(["that is the last commit, closing out"]);
+    expect(result.matches[0]).toEqual({ name: "retro", confidence: 90 });
+  });
+
   it("middle-truncates oversized messages instead of sending unbounded state", async () => {
     const fetchMock = vi.fn(async () => decisionResponse({ diagnose: 0.9 }));
     vi.stubGlobal("fetch", fetchMock);
