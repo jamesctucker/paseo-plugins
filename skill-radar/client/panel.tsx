@@ -4,7 +4,7 @@ import { Icon, ScrollView, copyText, useToast } from "@getpaseo/plugin/client/re
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { LayoutAnimation, Pressable, Text, View } from "react-native";
 import type { z } from "zod";
-import { PANEL_THRESHOLD, listSkills, skillEntrySchema } from "../shared/contracts";
+import { PANEL_THRESHOLD, WINDING_DOWN_THRESHOLD, listSkills, skillEntrySchema } from "../shared/contracts";
 import { dismissBanner, useRadar, type RadarMatch } from "./store";
 
 type SkillEntry = z.infer<typeof skillEntrySchema>;
@@ -180,6 +180,7 @@ interface AgentSuggestion {
   label: string;
   match: RadarMatch;
   skill: SkillEntry | undefined;
+  windingDown: number | null;
   updatedAt: number;
 }
 
@@ -201,6 +202,7 @@ interface SuggestionCardProps {
   match: RadarMatch;
   skill: SkillEntry | undefined;
   agentLabel: string;
+  windingDown: number | null;
   sectionKey: string;
   compact: boolean;
   copied: boolean;
@@ -214,6 +216,7 @@ function SuggestionCard({
   match,
   skill,
   agentLabel,
+  windingDown,
   sectionKey,
   compact,
   copied,
@@ -229,6 +232,9 @@ function SuggestionCard({
   const description = skill?.description ?? null;
   const showCopy = compact || hovered || copied;
   const showTooltip = description !== null && description.length > TRUNCATED_AT && (hovered || pinned);
+  // The server promotes closing skills at this threshold; the badge explains why
+  // a wrap-up skill topped the row instead of letting the promotion look random.
+  const wrappingUp = windingDown !== null && windingDown >= WINDING_DOWN_THRESHOLD;
 
   useEffect(() => {
     if (!showTooltip) return;
@@ -239,7 +245,7 @@ function SuggestionCard({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Copy ${match.name} for ${agentLabel}, ${match.confidence} percent match`}
+      accessibilityLabel={`Copy ${match.name} for ${agentLabel}, ${match.confidence} percent match${wrappingUp ? ", session may be wrapping up" : ""}`}
       accessibilityHint="Shows the full description on hover or long press"
       onPress={() => {
         setPinned(false);
@@ -255,6 +261,11 @@ function SuggestionCard({
         <Text style={styles.agentLabel} numberOfLines={1}>
           {agentLabel}
         </Text>
+        {wrappingUp ? (
+          <View style={styles.autoBadge}>
+            <Text style={styles.autoText}>wrapping up</Text>
+          </View>
+        ) : null}
         <View style={[styles.score, match.confidence > 90 && { borderColor: accent }]}>
           <Text style={styles.scoreText}>{match.confidence}%</Text>
         </View>
@@ -398,6 +409,7 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
         label: radar.labels[agentId] ?? "Untitled agent",
         match,
         skill: skills.find((entry) => entry.name === match.name),
+        windingDown: state.windingDown,
         updatedAt: state.updatedAt,
       });
     }
@@ -445,6 +457,7 @@ export function SkillRadarPanel({ theme, layout, workspaceId }: PluginWorkspaceP
                 match={entry.match}
                 skill={entry.skill}
                 agentLabel={entry.label}
+                windingDown={entry.windingDown}
                 sectionKey="relevant"
                 compact={layout.compact}
                 copied={copied === entry.match.name}

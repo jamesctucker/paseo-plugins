@@ -155,6 +155,7 @@ export function startRadar(client: PluginClientContext): () => void {
           status: result.status === "ok" ? "ready" : "unavailable",
           matches: result.matches,
           reason: result.reason,
+          windingDown: result.windingDown,
         },
         watcher.workspaceId,
       );
@@ -168,6 +169,9 @@ export function startRadar(client: PluginClientContext): () => void {
           status: "unavailable",
           matches: [],
           reason: "Classification request failed",
+          // A failed call says nothing about session state; a stale winding-down
+          // signal would keep the badge lit on a session that moved on.
+          windingDown: null,
         },
         watcher.workspaceId,
       );
