@@ -11,6 +11,8 @@ export interface AgentRadarState {
   status: RadarStatus;
   matches: RadarMatch[];
   reason: string | null;
+  /** P(session wrapping up) from the last classification; null when unknown or stale. */
+  windingDown: number | null;
   workspaceId: string | null;
   updatedAt: number;
 }
@@ -22,7 +24,7 @@ export interface RadarSnapshot {
   bannerDismissed: boolean;
 }
 
-const EMPTY: AgentRadarState = { status: "idle", matches: [], reason: null, workspaceId: null, updatedAt: 0 };
+const EMPTY: AgentRadarState = { status: "idle", matches: [], reason: null, windingDown: null, workspaceId: null, updatedAt: 0 };
 
 let states = new Map<string, AgentRadarState>();
 let labels = new Map<string, string>();
