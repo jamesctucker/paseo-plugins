@@ -212,6 +212,32 @@ interface SuggestionCardProps {
   onTooltipOpenChange(key: string, open: boolean): void;
 }
 
+interface CardTopProps {
+  agentLabel: string;
+  confidence: number;
+  wrappingUp: boolean;
+  styles: PanelStyles;
+  accent: string;
+}
+
+function CardTop({ agentLabel, confidence, wrappingUp, styles, accent }: CardTopProps) {
+  return (
+    <View style={styles.cardTop}>
+      <Text style={styles.agentLabel} numberOfLines={1}>
+        {agentLabel}
+      </Text>
+      {wrappingUp ? (
+        <View style={styles.autoBadge}>
+          <Text style={styles.autoText}>wrapping up</Text>
+        </View>
+      ) : null}
+      <View style={[styles.score, confidence > 90 && { borderColor: accent }]}>
+        <Text style={styles.scoreText}>{confidence}%</Text>
+      </View>
+    </View>
+  );
+}
+
 function SuggestionCard({
   match,
   skill,
@@ -257,19 +283,7 @@ function SuggestionCard({
       onHoverOut={() => setHovered(false)}
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed, showTooltip && styles.lifted]}
     >
-      <View style={styles.cardTop}>
-        <Text style={styles.agentLabel} numberOfLines={1}>
-          {agentLabel}
-        </Text>
-        {wrappingUp ? (
-          <View style={styles.autoBadge}>
-            <Text style={styles.autoText}>wrapping up</Text>
-          </View>
-        ) : null}
-        <View style={[styles.score, match.confidence > 90 && { borderColor: accent }]}>
-          <Text style={styles.scoreText}>{match.confidence}%</Text>
-        </View>
-      </View>
+      <CardTop agentLabel={agentLabel} confidence={match.confidence} wrappingUp={wrappingUp} styles={styles} accent={accent} />
       <View style={styles.skillLine}>
         <Text style={styles.name} numberOfLines={1}>
           {match.name}
