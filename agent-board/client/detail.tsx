@@ -180,6 +180,7 @@ export function CardDetailScreen({ theme, params, navigation }: CardDetailScreen
           const next = cards.map((entry) => (entry.id === cardId ? { ...entry, runs: [...entry.runs, run] } : entry));
           save(next);
         }}
+        onOpenAgent={(agentId) => navigation?.openAgent({ agentId })}
       />
     </View>
   );

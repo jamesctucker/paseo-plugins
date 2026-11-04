@@ -19,6 +19,8 @@ export interface SpawnSheetProps {
   open: boolean;
   onOpenChange(open: boolean): void;
   onSpawned(cardId: string, run: CardRun): void;
+  /** Jump to the spawned agent's chat once it starts. */
+  onOpenAgent?(agentId: string): void;
 }
 
 interface WorkspaceLite {
@@ -28,7 +30,7 @@ interface WorkspaceLite {
   activityAt: string;
 }
 
-export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned }: SpawnSheetProps) {
+export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenAgent }: SpawnSheetProps) {
   const paseo = usePaseo();
   const toast = useToast();
   const getIssue = useRpc(issueGetRpc);
@@ -94,6 +96,9 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned }: Spawn
           startedAt: new Date().toISOString(),
         });
         toast.show(`${card.jiraKey ?? card.title} is running`, { variant: "success" });
+        // The run is the board's job; the chat is where the work happens. Land
+        // the user in the agent so Run and the conversation are one motion.
+        onOpenAgent?.(agent.id);
         onOpenChange(false);
         setRepoPath("");
       } catch (cause) {
