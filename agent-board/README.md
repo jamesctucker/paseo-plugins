@@ -40,7 +40,7 @@ Settings → Plugins → Agent Board:
 - **Site domain**: `acme` or a full host when self-hosted
 - **Email + API token**: Atlassian API token (Basic auth); stays daemon-side
 - **Assigned JQL**: optional override of `assignee = currentUser() AND resolution = Unresolved`
-- **Spawn provider**: provider used by the spawn loop (default `opencode`)
+- **Spawn provider**: `provider/model` for new agents (default `opencode/deepseek/deepseek-flash`)
 
 ## Develop
 

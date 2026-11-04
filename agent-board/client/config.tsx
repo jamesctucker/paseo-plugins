@@ -68,7 +68,12 @@ export function ConfigScreen({ theme }: PluginSurfaceProps) {
       </SettingsSection>
       <SettingsSection title="Board">
         <SettingsCard>
-          <SettingsInput label="Spawn provider" hint="Provider used when a card runs" placeholder="opencode" {...field("spawnProvider")} />
+          <SettingsInput
+            label="Spawn provider"
+            hint="Provider/model for new agents, e.g. opencode/deepseek/deepseek-flash"
+            placeholder="opencode/deepseek/deepseek-flash"
+            {...field("spawnProvider")}
+          />
         </SettingsCard>
       </SettingsSection>
       <SettingsAction

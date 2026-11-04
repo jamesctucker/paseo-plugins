@@ -5,6 +5,7 @@ import { usePaseo, useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { issueGetRpc } from "../shared/contracts";
 import { jiraConfigDoc, type BoardCard, type CardRun } from "../shared/settings";
+import { resolveSpawnSpec, type ProviderCatalogEntry } from "../shared/provider";
 import { fullSeed, titleSeed } from "../shared/prompt";
 import { GroupLabel } from "./ui";
 
@@ -105,6 +106,10 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
       try {
         // An emptied field falls back to the seed; a run never sends nothing.
         const firstMessage = prompt.trim() || titleSeed(card);
+        // agent.create requires provider/model; resolve the configured value
+        // against the live catalog so a bare provider errors with the fix.
+        const snapshot = await paseo.providers.snapshot();
+        const providerSpec = resolveSpawnSpec(provider, (snapshot.entries ?? []) as ProviderCatalogEntry[]);
         const workspace =
           source.kind === "workspace"
             ? paseo.workspaces.ref(source.workspaceId)
@@ -118,7 +123,7 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
                   },
                 });
         const agent = await workspace.agents.create({
-          config: { provider },
+          config: { provider: providerSpec },
           prompt: firstMessage,
           title: card.jiraKey ?? card.title,
         });

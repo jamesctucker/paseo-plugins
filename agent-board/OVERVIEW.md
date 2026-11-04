@@ -19,7 +19,7 @@ Open Settings, Plugins, Agent Board to configure:
 - **Site domain**: your Atlassian site domain, for example `acme`, or a full host when self-hosted.
 - **Email and API token**: an Atlassian API token for that account. The token stays on the daemon.
 - **Assigned JQL**: optional override of the default assigned-to-me list.
-- **Spawn provider**: the provider used when a card runs.
+- **Spawn provider**: the `provider/model` new agents run on, for example `opencode/deepseek/deepseek-flash`.
 
 Requires Paseo 0.15.0 or later on the daemon. Works on desktop and mobile clients.
 

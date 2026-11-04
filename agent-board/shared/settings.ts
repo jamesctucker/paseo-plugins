@@ -1,5 +1,6 @@
 import { defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
+import { DEFAULT_SPAWN_SPEC } from "./provider";
 
 /**
  * Board persistence lives in host-scoped settings documents: daemon-side JSON
@@ -48,7 +49,7 @@ export const boardDoc = defineSettings({
 export const jiraConfigDoc = defineSettings({
   id: "jira-config",
   scope: "host",
-  version: 1,
+  version: 2,
   schema: z.object({
     /** e.g. `acme` or a full host when self-hosted. */
     domain: z.string().default(""),
@@ -56,9 +57,19 @@ export const jiraConfigDoc = defineSettings({
     token: z.string().default(""),
     /** Overrides the default assigned-to-me JQL when non-empty. */
     jql: z.string().default(""),
-    /** Provider used by the spawn loop's agent.create. */
-    spawnProvider: z.string().default("opencode"),
+    /**
+     * Provider used by the spawn loop's agent.create, in `provider/model`
+     * form (the SDK rejects a bare provider). v1 installs stored a bare
+     * provider; the migration promotes those to the default spec.
+     */
+    spawnProvider: z.string().default(DEFAULT_SPAWN_SPEC),
   }),
+  migrate: (values, fromVersion) => {
+    if (fromVersion >= 2) return values;
+    const stored = (values ?? {}) as { spawnProvider?: string };
+    const spawnProvider = stored.spawnProvider ?? "";
+    return { ...stored, spawnProvider: spawnProvider.includes("/") ? spawnProvider : DEFAULT_SPAWN_SPEC };
+  },
 });
 
 export const DEFAULT_ASSIGNED_JQL =
