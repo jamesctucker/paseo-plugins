@@ -10,7 +10,8 @@ paper bullet journal; it never replaces the tracker or the plan.
 - **Live rail**: board-spawned agents only, Running above Review, with a pulse + elapsed chip.
   Nothing running reads as two quiet words.
 - **Run loop**: card → source picker (existing workspace / repo path / PR worktree via
-  SDK-native `checkoutSource`) → workspace + agent seeded with the issue body → the card mirrors
+  SDK-native `checkoutSource`) with a **pre-seeded, editable prompt** — the human layer before
+  anything runs — then workspace + agent whose first message is that text → the card mirrors
   the agent's state. Finished agents land in Review; Open jumps to the agent in Paseo.
 - **Zero write-back**: Jira status is a read-only badge. The board never mutates the tracker.
 - **Attachment source**: `Attach a Jira issue` in the composer resolves through the same search

@@ -1,16 +1,21 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { usePaseo, useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { issueGetRpc } from "../shared/contracts";
 import { jiraConfigDoc, type BoardCard, type CardRun } from "../shared/settings";
+import { fullSeed, titleSeed } from "../shared/prompt";
+import { GroupLabel } from "./ui";
 
 /**
- * Run flow: source picker sheet ("Run in which workspace?"), then workspace +
- * agent creation seeded with the issue body, then the link lands back on the
- * card via onSpawned. Existing workspaces spawn in place; a repo path creates a
- * directory workspace; GitHub cards can cut a worktree at the pull request.
+ * Run flow: the prompt field pre-seeds with issue context and is editable —
+ * the human layer before anything runs. Then the source picker ("Run in which
+ * workspace?"), then workspace + agent creation whose first message is
+ * whatever the field holds, then the link lands back on the card.
+ *
+ * Existing workspaces spawn in place; a repo path creates a directory
+ * workspace; GitHub cards can cut a worktree at the pull request.
  */
 
 export interface SpawnSheetProps {
@@ -38,6 +43,32 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
   const [workspaces, setWorkspaces] = useState<WorkspaceLite[]>([]);
   const [repoPath, setRepoPath] = useState("");
   const [spawning, setSpawning] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const editedRef = useRef(false);
+
+  // The human layer: seed the field with issue context, then enrich it with
+  // the fetched body. Typing wins — the enrich pass never overwrites an edit.
+  useEffect(() => {
+    editedRef.current = false;
+    if (!open || !card) {
+      setPrompt("");
+      return;
+    }
+    setPrompt(titleSeed(card));
+    if (!card.jiraKey) return;
+    let cancelled = false;
+    getIssue({ key: card.jiraKey })
+      .then((issue) => {
+        if (!cancelled && !editedRef.current) setPrompt(fullSeed(card, issue));
+      })
+      .catch(() => {
+        // Enrichment is optional; the title seed runs fine on its own.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Reseed per card and per open. The ref is read fresh at resolve time.
+  }, [open, card?.id, getIssue]);
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +103,8 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
       if (!card || spawning) return;
       setSpawning(true);
       try {
-        const prompt = await seedPrompt(card, getIssue);
+        // An emptied field falls back to the seed; a run never sends nothing.
+        const firstMessage = prompt.trim() || titleSeed(card);
         const workspace =
           source.kind === "workspace"
             ? paseo.workspaces.ref(source.workspaceId)
@@ -87,7 +119,7 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
                 });
         const agent = await workspace.agents.create({
           config: { provider },
-          prompt,
+          prompt: firstMessage,
           title: card.jiraKey ?? card.title,
         });
         onSpawned(card.id, {
@@ -107,9 +139,9 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
         setSpawning(false);
       }
     },
-    // card/provider captured per render is intended: the sheet re-renders per card
+    // card/provider/prompt captured per render is intended: the sheet re-renders per card and per keystroke
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [card, provider, spawning],
+    [card, provider, spawning, prompt],
   );
 
   if (!card) return null;
@@ -123,6 +155,31 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
     >
       <Modal.Content>
         <View style={{ gap: 2, paddingVertical: 8 }}>
+          <GroupLabel theme={theme} text="Prompt" />
+          <TextInput
+            value={prompt}
+            onChangeText={(text) => {
+              editedRef.current = true;
+              setPrompt(text);
+            }}
+            multiline
+            placeholder="Edit before it runs…"
+            placeholderTextColor={theme.colors.foregroundMuted}
+            style={{
+              color: theme.colors.foreground,
+              backgroundColor: theme.colors.surface1,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              borderRadius: 8,
+              paddingHorizontal: 10,
+              paddingVertical: 8,
+              fontSize: 12,
+              minHeight: 72,
+              textAlignVertical: "top",
+            }}
+          />
+          <View style={{ height: 10 }} />
+          <GroupLabel theme={theme} text="Workspace" />
           {workspaces.map((workspace, index) => (
             <Pressable
               key={workspace.id}
@@ -200,23 +257,4 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
       </Modal.Content>
     </Modal>
   );
-}
-
-async function seedPrompt(
-  card: BoardCard,
-  getIssue: (input: { key: string }) => Promise<{ identifier: string; title: string; body: string; url: string; status: string }>,
-): Promise<string> {
-  if (card.jiraKey) {
-    try {
-      const issue = await getIssue({ key: card.jiraKey });
-      return [`Work ${issue.identifier}: ${issue.title}`, "", issue.body, "", `Issue: ${issue.url}`].join("\n");
-    } catch {
-      // Prompt seeding degrades to the card snapshot; the spawn still goes out.
-      return `Work ${card.jiraKey}: ${card.title}`;
-    }
-  }
-  if (card.github) {
-    return `Work on ${card.github.repo}#${card.github.number}: ${card.title}`;
-  }
-  return [`Work on: ${card.title}`, "", card.body].filter(Boolean).join("\n");
 }

@@ -8,7 +8,7 @@ It complements a paper bullet journal instead of replacing it. You pull the day'
 
 The board keeps its own local document on the daemon (cards, day stamps, card to agent links). Jira is read through a search, list, and get adapter, so issue keys resolve to cards and issue bodies seed the agent prompt. The board never writes back to Jira; tracker status appears as a read-only badge on the card.
 
-Running a card opens a source picker: an existing workspace, a repo path, or, for GitHub pull request cards, a fresh worktree checked out at the pull request. The card then mirrors its agent's live state, including elapsed time, and finished agents land in Review for a verdict.
+Running a card opens a source picker: an existing workspace, a repo path, or, for GitHub pull request cards, a fresh worktree checked out at the pull request. The picker also pre-seeds an editable prompt with the issue context, so you can shape the first message before anything runs. The card then mirrors its agent's live state, including elapsed time, and finished agents land in Review for a verdict.
 
 Each morning the board offers to carry over unfinished cards from yesterday, the same migration ritual a paper journal uses. Archived cards appear under a quiet Done this week divider and age out after seven days.
 
