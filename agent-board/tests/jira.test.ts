@@ -87,6 +87,51 @@ describe("createJiraAdapter", () => {
     const items = await adapter.search("PROJ-142");
     expect(items[0].identifier).toBe("PROJ-142");
   });
+
+  it("accepts a bare site name, a bare host, or a pasted URL as the domain", async () => {
+    for (const domain of [
+      "acme",
+      "acme.atlassian.net",
+      "https://acme.atlassian.net",
+      "https://acme.atlassian.net/browse",
+    ]) {
+      const request = vi.fn(async () => jsonResponse({ issues: [] }));
+      const adapter = createJiraAdapter({ ...config, domain }, request as unknown as typeof fetch);
+      await adapter.listAssigned();
+      const [url] = request.mock.calls[0] as unknown as [string, RequestInit];
+      expect(String(url).startsWith("https://acme.atlassian.net/rest/api/3/")).toBe(true);
+    }
+  });
+
+  it("reports unreachable hosts with the host and underlying cause", async () => {
+    const failure = Object.assign(new Error("fetch failed"), {
+      cause: new Error("getaddrinfo ENOTFOUND nope.atlassian.net"),
+    });
+    const request = vi.fn(async () => {
+      throw failure;
+    });
+    const adapter = createJiraAdapter(config, request as unknown as typeof fetch);
+    await expect(adapter.listAssigned()).rejects.toThrow(
+      "Could not reach Jira at https://acme.atlassian.net: getaddrinfo ENOTFOUND nope.atlassian.net",
+    );
+  });
+
+  it("surfaces a rejected token instead of a silent empty list", async () => {
+    const request = vi.fn(async (url: unknown) =>
+      String(url).includes("/myself") ? jsonResponse({ error: "auth" }, 401) : jsonResponse({ issues: [] }),
+    );
+    const adapter = createJiraAdapter(config, request as unknown as typeof fetch);
+    await expect(adapter.listAssigned()).rejects.toThrow(/rejected the token/i);
+  });
+
+  it("keeps a genuine empty list empty when the token is valid", async () => {
+    const request = vi.fn(async (url: unknown) =>
+      String(url).includes("/myself") ? jsonResponse({ accountId: "u1" }) : jsonResponse({ issues: [] }),
+    );
+    const adapter = createJiraAdapter(config, request as unknown as typeof fetch);
+    const items = await adapter.listAssigned();
+    expect(items).toEqual([]);
+  });
 });
 
 function paragraphText() {

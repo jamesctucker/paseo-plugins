@@ -41,9 +41,12 @@ const SEARCH_FIELDS = [
 ].join(",");
 
 function apiBase(domain: string): string {
-  const host = domain.trim();
-  if (!host) throw new Error("No Jira domain configured. Open the Agent Board settings.");
-  return host.includes(".") ? `https://${host}` : `https://${host}.atlassian.net`;
+  // The field accepts a bare site name, a bare host, or a pasted URL; keep
+  // only the hostname so a pasted scheme does not double up.
+  const raw = domain.trim().replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, "").split(/[/?#]/)[0];
+  if (!raw) throw new JiraApiError("No Jira domain configured. Open the Agent Board settings.");
+  const host = raw.includes(".") ? raw : `${raw}.atlassian.net`;
+  return `https://${host}`;
 }
 
 /** JQL string literals are double-quoted; embedded quotes are escaped twice. */
@@ -74,15 +77,28 @@ export function createJiraAdapter(
   }
 
   async function rest<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await request(`${base}${path}`, {
-      ...init,
-      headers: {
-        Authorization: auth,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
-    });
+    let response: Response;
+    try {
+      response = await request(`${base}${path}`, {
+        ...init,
+        headers: {
+          Authorization: auth,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(init?.headers ?? {}),
+        },
+      });
+    } catch (cause) {
+      // Node fetch wraps DNS/TLS/URL failures in a generic "fetch failed";
+      // unwrap the cause so the message says which host was unreachable.
+      const reason =
+        cause instanceof Error
+          ? cause.cause instanceof Error
+            ? cause.cause.message
+            : cause.message
+          : String(cause);
+      throw new JiraApiError(`Could not reach Jira at ${base}: ${reason}`);
+    }
     if (response.status === 401 || response.status === 403) {
       throw new JiraApiError("Jira rejected the token. Check the email and API token in settings.");
     }
@@ -90,6 +106,16 @@ export function createJiraAdapter(
       throw new JiraApiError(`Jira request failed with HTTP ${response.status}`);
     }
     return (await response.json()) as T;
+  }
+
+  /**
+   * search/jql answers anonymous callers with an empty 200, so a rejected
+   * token is indistinguishable from "nothing assigned" until this probe
+   * turns it into a clear auth error. Called only when a search comes back
+   * empty; results present mean the token worked.
+   */
+  async function assertAuthenticated(): Promise<void> {
+    await rest<{ accountId: string }>("/rest/api/3/myself");
   }
 
   function toSummary(issue: JiraIssue): IssueSummary {
@@ -128,13 +154,17 @@ export function createJiraAdapter(
         `/rest/api/3/search/jql?jql=${encodeURIComponent(`key = ${jqlString(normalized)}`)}&maxResults=5&fields=${SEARCH_FIELDS}`,
         { method: "POST" },
       ).catch(() => null);
-      if (exact?.issues?.length) return exact.issues.map(toSummary);
-      const jql = `text ~ ${jqlString(normalized)} ORDER BY updated DESC`;
-      const found = await rest<SearchResponse>("/rest/api/3/search/jql", {
-        method: "POST",
-        body: JSON.stringify({ jql, maxResults: 20, fields: SEARCH_FIELDS.split(",") }),
-      });
-      return (found.issues ?? []).map(toSummary);
+      const issues = exact?.issues ?? [];
+      if (issues.length === 0) {
+        const jql = `text ~ ${jqlString(normalized)} ORDER BY updated DESC`;
+        const found = await rest<SearchResponse>("/rest/api/3/search/jql", {
+          method: "POST",
+          body: JSON.stringify({ jql, maxResults: 20, fields: SEARCH_FIELDS.split(",") }),
+        });
+        issues.push(...(found.issues ?? []));
+      }
+      if (issues.length === 0) await assertAuthenticated();
+      return issues.map(toSummary);
     },
 
     async listAssigned() {
@@ -143,7 +173,9 @@ export function createJiraAdapter(
         method: "POST",
         body: JSON.stringify({ jql, maxResults: 25, fields: SEARCH_FIELDS.split(",") }),
       });
-      return (found.issues ?? []).map(toSummary);
+      const issues = found.issues ?? [];
+      if (issues.length === 0) await assertAuthenticated();
+      return issues.map(toSummary);
     },
 
     async get(key) {

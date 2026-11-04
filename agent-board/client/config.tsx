@@ -50,7 +50,7 @@ export function ConfigScreen({ theme }: PluginSurfaceProps) {
     <View style={{ gap: 8 }}>
       <SettingsSection title="Jira">
         <SettingsCard>
-          <SettingsInput label="Site domain" hint="e.g. acme, or a full host" placeholder="acme" {...field("domain")} />
+          <SettingsInput label="Site domain" hint="Site name, host, or URL, e.g. acme" placeholder="acme" {...field("domain")} />
           <SettingsInput label="Email" placeholder="you@example.com" {...field("email")} />
           <SettingsInput
             label="API token"
