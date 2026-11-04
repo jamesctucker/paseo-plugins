@@ -19,6 +19,7 @@ export function ConfigScreen({ theme }: PluginSurfaceProps) {
   const settings = useSettings(jiraConfigDoc);
   const [draft, setDraft] = useState<JiraConfig | null>(null);
   const [saved, setSaved] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const values = settings.status === "ready" ? settings.values : null;
   const current = draft ?? values;
@@ -40,10 +41,9 @@ export function ConfigScreen({ theme }: PluginSurfaceProps) {
   async function save() {
     if (settings.status !== "ready" || !draft) return;
     const ok = await settings.save(draft, settings.revision);
-    if (ok) {
-      setDraft(null);
-      setSaved(true);
-    }
+    setSaved(ok);
+    setFailed(!ok);
+    if (ok) setDraft(null);
   }
 
   return (
@@ -73,7 +73,7 @@ export function ConfigScreen({ theme }: PluginSurfaceProps) {
       </SettingsSection>
       <SettingsAction
         label="Save"
-        hint={saved ? "Saved" : undefined}
+        hint={saved ? "Saved" : failed ? "Could not save, try again" : undefined}
         actionLabel={dirty ? "Save" : "Saved"}
         disabled={!dirty}
         onPress={() => void save()}
