@@ -1,0 +1,9 @@
+{
+  "id": "agent-board",
+  "name": "Agent Board",
+  "description": "A daily execution board: today's committed work on the left, live agents on the right.",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.15.0"
+  }
+}
