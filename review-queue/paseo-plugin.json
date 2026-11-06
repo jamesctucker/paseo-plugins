@@ -1,0 +1,9 @@
+{
+  "id": "review-queue",
+  "name": "Review Queue",
+  "description": "Sidebar panel listing the GitHub pull requests waiting on your review.",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.15.0"
+  }
+}
