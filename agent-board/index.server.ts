@@ -16,6 +16,7 @@ import {
   linearListRpc,
   linearSearchRpc,
   linearStatusesRpc,
+  spawnPathCheckRpc,
 } from "./shared/contracts";
 import { createHandlers, settingsStore } from "./server/handlers";
 
@@ -41,5 +42,6 @@ export default function contribute(server: PluginServerContext) {
   server.handle(linearChainRpc, handlers.linear.chain);
   server.handle(boardStopRpc, handlers.board.stop);
   server.handle(boardCapabilitiesRpc, handlers.board.capabilities);
+  server.handle(spawnPathCheckRpc, handlers.spawn.pathCheck);
   return () => {};
 }

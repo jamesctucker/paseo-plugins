@@ -193,5 +193,16 @@ export const boardCapabilitiesRpc = defineRpc({
   output: z.object({ canStop: z.boolean() }),
 });
 
+/**
+ * The spawn sheet's free-text commit can't touch the filesystem from the
+ * client, so a typo must fail here — not after a workspace exists at a wrong
+ * directory.
+ */
+export const spawnPathCheckRpc = defineRpc({
+  name: "spawn.path-check",
+  input: z.object({ path: z.string() }),
+  output: z.object({ exists: z.boolean() }),
+});
+
 export type IssueSearchItem = IssueSummary;
 export type { IssueDetail, IssueSummary };

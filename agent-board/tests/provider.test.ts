@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SPAWN_SPEC, resolveSpawnSpec, SpawnConfigError, WORK_SPAWN_SPEC } from "../shared/provider";
+import { DEFAULT_SPAWN_SPEC, resolveSpawnSpec, SpawnConfigError, spawnOptions, WORK_SPAWN_SPEC } from "../shared/provider";
 import { jiraConfigDoc } from "../shared/settings";
 
 const catalog = [
@@ -26,6 +26,38 @@ describe("resolveSpawnSpec", () => {
 
   it("names the provider's first model in the error even off-catalog", () => {
     expect(() => resolveSpawnSpec("codex", catalog)).toThrow(/codex\/<model>/);
+  });
+});
+
+describe("spawnOptions", () => {
+  it("flattens the catalog into provider/model specs with display labels", () => {
+    const options = spawnOptions([
+      {
+        provider: "opencode",
+        models: [{ id: "deepseek/deepseek-flash", label: "DeepSeek Flash", isDefault: true }],
+      },
+      { provider: "claude", models: [{ id: "claude-sonnet-4" }] },
+    ]);
+    expect(options).toEqual([
+      { spec: "opencode/deepseek/deepseek-flash", label: "DeepSeek Flash", provider: "opencode", isDefault: true },
+      { spec: "claude/claude-sonnet-4", label: "claude-sonnet-4", provider: "claude", isDefault: false },
+    ]);
+  });
+
+  it("skips disabled providers and unselectable models", () => {
+    const options = spawnOptions([
+      { provider: "codex", enabled: false, models: [{ id: "gpt-5" }] },
+      { provider: "claude", models: [{ id: "claude-sonnet-4", isSelectable: false }, { id: "claude-haiku-4" }] },
+    ]);
+    expect(options.map((option) => option.spec)).toEqual(["claude/claude-haiku-4"]);
+  });
+
+  it("keeps catalog order rather than re-sorting", () => {
+    const options = spawnOptions([
+      { provider: "b", models: [{ id: "two" }] },
+      { provider: "a", models: [{ id: "one" }] },
+    ]);
+    expect(options.map((option) => option.spec)).toEqual(["b/two", "a/one"]);
   });
 });
 

@@ -1,3 +1,6 @@
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { RpcInput } from "@getpaseo/plugin";
 import { DEFAULT_ASSIGNED_JQL, type GitHubConfig, type JiraConfig, type LinearConfig } from "../shared/settings";
@@ -17,6 +20,7 @@ import {
   linearListRpc,
   linearSearchRpc,
   linearStatusesRpc,
+  spawnPathCheckRpc,
 } from "../shared/contracts";
 import { createJiraAdapter, type JiraAdapter } from "./jira";
 import { createGitHubAdapter, type GitHubAdapter } from "./github";
@@ -127,6 +131,18 @@ export function createHandlers(
 
       async capabilities(_input: RpcInput<typeof boardCapabilitiesRpc>) {
         return { canStop: resolveCli() !== null };
+      },
+    },
+
+    spawn: {
+      async pathCheck({ path }: RpcInput<typeof spawnPathCheckRpc>) {
+        // The sheet accepts "~/" because humans type it; Node doesn't.
+        const expanded = path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+        try {
+          return { exists: statSync(expanded).isDirectory() };
+        } catch {
+          return { exists: false };
+        }
       },
     },
   };
