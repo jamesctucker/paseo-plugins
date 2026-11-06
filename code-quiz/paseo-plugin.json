@@ -1,0 +1,9 @@
+{
+  "id": "code-quiz",
+  "name": "Code Quiz",
+  "description": "Sidebar panel that launches a teacher agent to quiz you on code in your work repos.",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.15.0"
+  }
+}
