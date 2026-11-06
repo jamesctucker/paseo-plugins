@@ -1,16 +1,19 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { BoardCard } from "../shared/settings";
 import { formatElapsed } from "../shared/day";
-import { Chip, PulseDot, sourceGlyph, statusColor } from "./ui";
+import { Chip, PulseDot, SourceTag, agentLabel, monoFont, sourceGlyph, statusColor } from "./ui";
 import type { AgentEntry } from "./agent-directory";
 
 /**
- * The 26pt card row: source glyph, mono key, medium title, read-only tracker
- * badge, live agent chip, chevron. Long-press enters the tap-to-place reorder
- * flow, which works identically on desktop and phone.
+ * A card on the Today list: one meta line (source glyph and tag, mono key,
+ * tracker badge, live chip, chevron) over a full-width title. The key always
+ * truncates to a single line, so titles align down the list regardless of
+ * identifier length. Long-press (or the hover grip on desktop) enters the
+ * tap-to-place reorder flow; the chevron always means detail and the live
+ * chip is the agent shortcut.
  */
 
 export interface CardRowProps {
@@ -20,6 +23,9 @@ export interface CardRowProps {
   runStartedAt: number | null;
   now: number;
   active: boolean;
+  compact: boolean;
+  /** Rendered under a group header: the header carries the key and status. */
+  grouped?: boolean;
   onPress(): void;
   onLongPress?(): void;
   onOpenAgent?(): void;
@@ -32,42 +38,60 @@ export function CardRow({
   runStartedAt,
   now,
   active,
+  compact,
+  grouped,
   onPress,
   onLongPress,
   onOpenAgent,
 }: CardRowProps) {
+  const [hovered, setHovered] = useState(false);
   const styles = useMemo(
     () => ({
-      row: {
+      card: {
+        marginHorizontal: 8,
+        marginVertical: 4,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        gap: 6,
+        borderRadius: 10,
+        backgroundColor: active ? theme.colors.surface2 : theme.colors.surface1,
+        borderWidth: 1,
+        borderColor: active ? theme.colors.accent : theme.colors.border,
+      },
+      meta: {
         flexDirection: "row" as const,
         alignItems: "center" as const,
         gap: 8,
-        minHeight: 26,
-        paddingVertical: 6,
-        paddingHorizontal: 8,
-        borderRadius: 8,
-        backgroundColor: active ? theme.colors.surface1 : "transparent",
-        borderWidth: active ? 1 : 0,
-        borderColor: theme.colors.accent,
       },
       key: {
         color: theme.colors.foregroundMuted,
         fontSize: 12,
-        fontFamily: "Menlo",
+        fontFamily: monoFont,
+        flexShrink: 1,
       },
       title: {
         color: theme.colors.foreground,
-        fontSize: 13,
+        fontSize: 14,
         fontWeight: "500" as const,
-        flexShrink: 1,
       },
       spacer: { flex: 1 },
     }),
     [theme, active],
   );
 
-  const keyText = card.source === "jira" ? card.jiraKey : card.source === "github" ? `${card.github?.repo}#${card.github?.number}` : null;
-  const chip = liveChip(theme, card, agent, runStartedAt, now);
+  const keyText = grouped
+    ? null
+    : card.source === "github"
+      ? `${card.github?.repo}#${card.github?.number}`
+      : (card.jiraKey ?? null);
+  const chipBody = liveChip(theme, card, agent, runStartedAt, now);
+  const chip = agent && onOpenAgent && chipBody ? (
+    <Pressable accessibilityRole="button" accessibilityLabel="Open agent" onPress={onOpenAgent} hitSlop={6}>
+      {chipBody}
+    </Pressable>
+  ) : (
+    chipBody
+  );
 
   return (
     <Pressable
@@ -75,28 +99,40 @@ export function CardRow({
       accessibilityLabel={card.title}
       onPress={onPress}
       onLongPress={onLongPress}
-      style={({ pressed }) => [
-        styles.row,
-        { opacity: pressed ? 0.7 : 1 },
-      ]}
+      onHoverIn={() => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
+      style={({ pressed }) => [styles.card, { opacity: pressed ? 0.8 : 1 }]}
     >
-      <Icon name={sourceGlyph(card.source)} size={14} color={theme.colors.foregroundMuted} />
-      {keyText ? <Text style={styles.key}>{keyText}</Text> : null}
-      <Text style={styles.title} numberOfLines={1}>
+      <View style={styles.meta}>
+        {!compact && onLongPress && (hovered || active) ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="Reorder card" onPress={onLongPress} hitSlop={4}>
+            <Icon name="GripVertical" size={12} color={theme.colors.foregroundMuted} />
+          </Pressable>
+        ) : null}
+        <Icon name={sourceGlyph(card.source)} size={14} color={theme.colors.foregroundMuted} />
+        <SourceTag theme={theme} source={card.source} />
+        {card.source === "linear" ? (
+          // The rote/creative doctrine lives on the card; unrouted is shown
+          // so a missing Route tag reads as a nudge, not an absence.
+          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>{card.route ?? "unrouted"}</Text>
+        ) : null}
+        {keyText ? (
+          <Text style={styles.key} numberOfLines={1}>
+            {keyText}
+          </Text>
+        ) : null}
+        <View style={styles.spacer} />
+        {!grouped && card.jiraStatus ? (
+          // Long tracker statuses ("Developer Review") are the meta line's
+          // most expendable element, so they ellipsize before anything else.
+          <Chip theme={theme} text={card.jiraStatus} color={theme.colors.foregroundMuted} style={{ flexShrink: 1 }} />
+        ) : null}
+        {chip}
+        <Icon name="ChevronRight" size={14} color={theme.colors.foregroundMuted} />
+      </View>
+      <Text style={styles.title} numberOfLines={2}>
         {card.title}
       </Text>
-      <View style={styles.spacer} />
-      {card.jiraStatus ? (
-        <Chip theme={theme} text={card.jiraStatus} color={theme.colors.foregroundMuted} />
-      ) : null}
-      {chip}
-      {agent && onOpenAgent ? (
-        <Pressable accessibilityRole="button" accessibilityLabel="Open agent" onPress={onOpenAgent} hitSlop={6}>
-          <Icon name="ChevronRight" size={14} color={theme.colors.foregroundMuted} />
-        </Pressable>
-      ) : (
-        <Icon name="ChevronRight" size={14} color={theme.colors.foregroundMuted} />
-      )}
     </Pressable>
   );
 }
@@ -110,8 +146,7 @@ function liveChip(
 ) {
   if (!agent) return null;
   if (agent.requiresAttention) {
-    const label = agent.attentionReason === "permission" ? "Needs you" : agent.attentionReason === "error" ? "Errored" : "Finished";
-    return <Chip theme={theme} text={label} color={statusColor(theme, agent.attentionReason ?? "finished")} />;
+    return <Chip theme={theme} text={agentLabel(agent)} color={statusColor(theme, agent.attentionReason ?? "finished")} />;
   }
   if (agent.status === "running" || agent.status === "initializing") {
     const elapsed = runStartedAt ? formatElapsed(runStartedAt, now) : "just now";

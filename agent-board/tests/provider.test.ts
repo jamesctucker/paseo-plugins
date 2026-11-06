@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SPAWN_SPEC, resolveSpawnSpec, SpawnConfigError } from "../shared/provider";
+import { DEFAULT_SPAWN_SPEC, resolveSpawnSpec, SpawnConfigError, WORK_SPAWN_SPEC } from "../shared/provider";
 import { jiraConfigDoc } from "../shared/settings";
 
 const catalog = [
@@ -46,8 +46,14 @@ describe("jira-config migration", () => {
     expect(result).toMatchObject({ spawnProvider: "opencode/deepseek/deepseek-flash" });
   });
 
-  it("passes v2 values through unchanged", () => {
+  it("adds the Jira spawn lane when migrating v2 to v3", () => {
     const migrate = jiraConfigDoc.migrate as (values: unknown, fromVersion: number) => unknown;
-    expect(migrate({ spawnProvider: "x/y" }, 2)).toEqual({ spawnProvider: "x/y" });
+    expect(migrate({ spawnProvider: "x/y" }, 2)).toEqual({ spawnProvider: "x/y", spawnProviderJira: WORK_SPAWN_SPEC });
+  });
+
+  it("passes v3 values through unchanged", () => {
+    const migrate = jiraConfigDoc.migrate as (values: unknown, fromVersion: number) => unknown;
+    const values = { spawnProvider: "x/y", spawnProviderJira: "a/b" };
+    expect(migrate(values, 3)).toEqual(values);
   });
 });

@@ -88,6 +88,18 @@ describe("createJiraAdapter", () => {
     expect(items[0].identifier).toBe("PROJ-142");
   });
 
+  it("posts the exact-key JQL in the request body, not the query string", async () => {
+    // Live-verified 2026-11-06: /search/jql with the JQL in the query string
+    // and no body is a 400, and text ~ does not match keys — so a body-less
+    // exact lookup silently loses the issue and quick-add falls through.
+    const request = vi.fn(async () => jsonResponse({ issues: [] }));
+    const adapter = createJiraAdapter(config, request as unknown as typeof fetch);
+    await adapter.search("OPS-28506");
+    const call = request.mock.calls[0] as unknown as [string, RequestInit];
+    expect(call[0]).not.toContain("jql=");
+    expect(JSON.parse(String(call[1].body)).jql).toBe('key = "OPS-28506"');
+  });
+
   it("accepts a bare site name, a bare host, or a pasted URL as the domain", async () => {
     for (const domain of [
       "acme",
@@ -137,3 +149,28 @@ describe("createJiraAdapter", () => {
 function paragraphText() {
   return { type: "paragraph", content: [{ type: "text", text: "Body text." }] };
 }
+describe("statuses", () => {
+  it("maps status categories to done flags, JQL in the body", async () => {
+    const request = vi.fn(async () =>
+      jsonResponse({
+        issues: [
+          { id: "1", key: "OPS-1", fields: { status: { name: "Done", statusCategory: { key: "done" } } } },
+          { id: "2", key: "OPS-2", fields: { status: { name: "Developer Review", statusCategory: { key: "indeterminate" } } } },
+        ],
+      }),
+    );
+    const adapter = createJiraAdapter(config, request as unknown as typeof fetch);
+    const statuses = await adapter.statuses(["OPS-1", "OPS-2"]);
+    const init = (request.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(JSON.parse(String(init.body)).jql).toBe('key in ("OPS-1", "OPS-2")');
+    expect(statuses["OPS-1"].done).toBe(true);
+    expect(statuses["OPS-2"]).toEqual({ status: "Developer Review", done: false });
+  });
+
+  it("short-circuits on an empty key list", async () => {
+    const request = vi.fn();
+    const adapter = createJiraAdapter(config, request as unknown as typeof fetch);
+    expect(await adapter.statuses([])).toEqual({});
+    expect(request).not.toHaveBeenCalled();
+  });
+});

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
-import { Modal } from "@getpaseo/plugin/client/ui";
+import { Icon, Modal } from "@getpaseo/plugin/client/ui";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { useRpc } from "@getpaseo/plugin/client";
 import { issueListRpc } from "../shared/contracts";
+import { monoFont } from "./ui";
 import type { IssueSummary } from "../shared/tracker";
 
 /**
@@ -48,7 +49,7 @@ export function JiraSheet({ theme, open, onOpenChange, onPick, onOpenSettings }:
   return (
     <Modal
       title="Add from Jira"
-      icon={<Text style={{ color: theme.colors.foreground, fontSize: 16 }}>＋</Text>}
+      icon={<Icon name="Plus" size={16} color={theme.colors.foreground} />}
       open={open}
       onOpenChange={onOpenChange}
     >
@@ -61,6 +62,7 @@ export function JiraSheet({ theme, open, onOpenChange, onPick, onOpenSettings }:
               <Text style={{ color: theme.colors.statusDanger, fontSize: 12, flexShrink: 1 }}>{error}</Text>
               <Pressable
                 accessibilityRole="button"
+                accessibilityLabel="Open token config"
                 onPress={() => {
                   onOpenChange(false);
                   onOpenSettings();
@@ -93,7 +95,7 @@ export function JiraSheet({ theme, open, onOpenChange, onPick, onOpenSettings }:
                   opacity: pressed ? 0.7 : 1,
                 })}
               >
-                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontFamily: "Menlo" }}>
+                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontFamily: monoFont }}>
                   {issue.identifier}
                 </Text>
                 <Text

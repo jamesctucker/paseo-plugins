@@ -17,7 +17,7 @@ export interface JiraAdapterConfig {
 interface JiraFields {
   summary?: string;
   description?: unknown;
-  status?: { name?: string };
+  status?: { name?: string; statusCategory?: { key?: string } };
   assignee?: { displayName?: string } | null;
   updated?: string;
   issuetype?: { name?: string };
@@ -65,10 +65,16 @@ interface SearchResponse {
   issues?: JiraIssue[];
 }
 
+/** The adapter plus the gate read the Done-nag needs (amendment 2026-11-06). */
+export interface JiraAdapter extends IssueAdapter {
+  /** Fresh status per key; `done` comes from the status category, not the name. */
+  statuses(keys: string[]): Promise<Record<string, { status: string; done: boolean }>>;
+}
+
 export function createJiraAdapter(
   config: JiraAdapterConfig,
   request: typeof fetch = fetch,
-): IssueAdapter {
+): JiraAdapter {
   const base = apiBase(config.domain);
   const auth = `Basic ${btoa(`${config.email.trim()}:${config.token.trim()}`)}`;
 
@@ -149,11 +155,13 @@ export function createJiraAdapter(
       const normalized = query.trim();
       if (!normalized) return [];
       // Exact keys are cheapest and are what quick-add pastes; fall through to
-      // a text search for everything else.
-      const exact = await rest<SearchResponse>(
-        `/rest/api/3/search/jql?jql=${encodeURIComponent(`key = ${jqlString(normalized)}`)}&maxResults=5&fields=${SEARCH_FIELDS}`,
-        { method: "POST" },
-      ).catch(() => null);
+      // a text search for everything else. The JQL goes in the body: the same
+      // request with a query string and no body is a 400 (verified live), and
+      // text ~ does not match keys, so a broken exact call loses the issue.
+      const exact = await rest<SearchResponse>("/rest/api/3/search/jql", {
+        method: "POST",
+        body: JSON.stringify({ jql: `key = ${jqlString(normalized)}`, maxResults: 5, fields: SEARCH_FIELDS.split(",") }),
+      }).catch(() => null);
       const issues = exact?.issues ?? [];
       if (issues.length === 0) {
         const jql = `text ~ ${jqlString(normalized)} ORDER BY updated DESC`;
@@ -189,6 +197,23 @@ export function createJiraAdapter(
         url: `${base}/browse/${issue.key}`,
         status: issue.fields?.status?.name ?? "",
       };
+    },
+
+    async statuses(keys) {
+      if (keys.length === 0) return {};
+      const listed = keys.map(jqlString).join(", ");
+      const found = await rest<SearchResponse>("/rest/api/3/search/jql", {
+        method: "POST",
+        body: JSON.stringify({ jql: `key in (${listed})`, maxResults: 50, fields: ["status"] }),
+      });
+      const statuses: Record<string, { status: string; done: boolean }> = {};
+      for (const issue of found.issues ?? []) {
+        statuses[issue.key] = {
+          status: issue.fields?.status?.name ?? "",
+          done: issue.fields?.status?.statusCategory?.key === "done",
+        };
+      }
+      return statuses;
     },
   };
 }

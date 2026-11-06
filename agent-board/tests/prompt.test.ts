@@ -49,7 +49,29 @@ describe("fullSeed", () => {
         "",
         "The pump sticks on cold starts.",
         "",
-        "Issue: https://acme.atlassian.net/browse/PROJ-142",
+        "Link: https://acme.atlassian.net/browse/PROJ-142",
+      ].join("\n"),
+    );
+  });
+
+  it("headlines the task and names the issue when they differ", () => {
+    expect(
+      fullSeed(card({ source: "jira", jiraKey: "PROJ-142", title: "patch the seal" }), {
+        identifier: "PROJ-142",
+        title: "Fix the pump",
+        body: "The pump sticks on cold starts.",
+        url: "https://acme.atlassian.net/browse/PROJ-142",
+        status: "In Progress",
+      }),
+    ).toBe(
+      [
+        "Work PROJ-142: patch the seal",
+        "",
+        "Issue: PROJ-142 — Fix the pump",
+        "",
+        "The pump sticks on cold starts.",
+        "",
+        "Link: https://acme.atlassian.net/browse/PROJ-142",
       ].join("\n"),
     );
   });

@@ -14,9 +14,17 @@ export function titleSeed(card: BoardCard): string {
   return card.body ? `Work on: ${card.title}\n\n${card.body}` : `Work on: ${card.title}`;
 }
 
-/** Full seed once the issue body has been fetched. */
+/**
+ * Full seed once the issue body has been fetched. The headline is the task
+ * (card title); when the task is narrower than the issue, the issue's own
+ * title rides as context so the agent knows both the focused task and the
+ * whole (brief amendment 2026-11-05, decision 3).
+ */
 export function fullSeed(card: BoardCard, issue: IssueDetail): string {
-  return [`Work ${issue.identifier}: ${issue.title}`, "", issue.body, "", `Issue: ${issue.url}`].join(
-    "\n",
-  );
+  const lines = [`Work ${issue.identifier}: ${card.title}`];
+  if (card.title.trim() !== issue.title.trim()) {
+    lines.push("", `Issue: ${issue.identifier} — ${issue.title}`);
+  }
+  lines.push("", issue.body, "", `Link: ${issue.url}`);
+  return lines.join("\n");
 }

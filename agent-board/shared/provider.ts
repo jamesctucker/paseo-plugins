@@ -8,6 +8,12 @@
 
 export const DEFAULT_SPAWN_SPEC = "opencode/deepseek/deepseek-flash";
 
+/**
+ * The work lane (amendment decision 8): Jira cards spawn on the Work—Builder
+ * model so work agents stay on `openrouter/*` and personal agents stay off it.
+ */
+export const WORK_SPAWN_SPEC = "opencode/openrouter/moonshotai/kimi-k3";
+
 export interface ProviderCatalogEntry {
   provider: string;
   models?: { id: string }[];

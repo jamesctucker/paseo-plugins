@@ -49,7 +49,26 @@ export function doneThisWeek<T extends DatedCard>(
 export function formatElapsed(startedAtMs: number, nowMs: number): string {
   const delta = Math.max(0, nowMs - startedAtMs);
   const minutes = Math.floor(delta / 60_000);
+  if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+/**
+ * Past-tense relative time for history rows ("when did that happen"):
+ * minutes under an hour, hours under a day, days under a week, then a short
+ * date. formatElapsed stays for live chips; absolute locale strings with
+ * second precision are machine dumps, not UI copy.
+ */
+export function formatRelative(startedAtMs: number, nowMs: number): string {
+  const delta = Math.max(0, nowMs - startedAtMs);
+  const minutes = Math.floor(delta / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(startedAtMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
