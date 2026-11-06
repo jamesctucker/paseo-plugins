@@ -14,11 +14,11 @@ The board keeps its own local document on the daemon (cards, day stamps, card to
 
 The integrations live in a channel dock at the board's right edge: one icon per channel opens its sheet (assigned Jira issues, open pull requests assigned to, created by, or awaiting review from you, or your assigned Linear issues). On phone layouts the channels are buttons in the Today header instead.
 
-Running a card opens a source picker: an existing workspace, a repo path, or, for GitHub pull request cards, a fresh worktree checked out at the pull request. The picker also pre-seeds an editable prompt with the issue context, so you can shape the first message before anything runs. Each tracker spawns on its own model lane (a work model for Jira, a personal model for Linear, a fallback for everything else), configured in settings, and a model row in the same sheet can override the lane for that one run. Linear cards carry their `Route:` doctrine line as a badge, and spawning an agent on a creative or unrouted card asks once first. The card then mirrors its agent's live state, including elapsed time, and finished agents land in Review for a verdict.
+Running a card opens a short form: workspace, prompt, model, and thinking level, with one Run button at the bottom. The workspace defaults to your most recent one; its picker also offers a repo path (checked before anything is created) or, for GitHub pull request cards, a fresh worktree checked out at the pull request. The prompt is pre-seeded with the issue context, so you can shape the first message before anything runs. Each tracker spawns on its own model lane (a work model for Jira, a personal model for Linear, a fallback for everything else), configured in settings. The form can override the model and, when the model offers levels, its thinking level for that one run. On desktop, Cmd+Enter runs. Linear cards carry their `Route:` doctrine line as a badge, and running a creative or unrouted card asks once first. The card then mirrors its agent's live state, including elapsed time, and finished agents land in Review for a verdict.
 
 A Linear card's detail screen shows its chain: every issue in its Linear project with state, in delegation order, so the resume point is one tap away.
 
-Each morning the board offers to carry over unfinished cards from yesterday, the same migration ritual a paper journal uses. Archived cards appear under a quiet Done this week divider and age out after seven days.
+Each morning the board offers to carry over unfinished cards from yesterday, the same migration ritual a paper journal uses. Archived cards appear under a quiet Done this week divider and age out after seven days. The Today header counts what you finished today, and an emptied list reads as a cleared day rather than a blank morning.
 
 ## Setup
 
@@ -29,7 +29,7 @@ Open Settings, Plugins, Agent Board to configure:
 - **Assigned JQL**: optional override of the default assigned-to-me list.
 - **GitHub personal access token**: a token with repo scope. The token stays on the daemon.
 - **Linear API key**: a Linear personal API key. The key stays on the daemon.
-- **Spawn providers**: the `provider/model` per lane — one for Jira cards (the work lane), one for Linear cards (the personal lane), and a fallback for prompt and GitHub cards, for example `opencode/deepseek/deepseek-flash`.
+- **Spawn providers**: the `provider/model` per lane: one for Jira cards (the work lane), one for Linear cards (the personal lane), and a fallback for prompt and GitHub cards, for example `opencode/deepseek/deepseek-flash`.
 
 Requires Paseo 0.15.0 or later on the daemon. Works on desktop and mobile clients.
 
