@@ -155,8 +155,13 @@ export const githubConfigDoc = defineSettings({
   }),
 });
 
+/**
+ * Status category, not `resolution`: work is often moved to Done without a
+ * resolution being set, and those issues then sat at the top of the picker
+ * (sorted by `updated`) as unpickable archive rows.
+ */
 export const DEFAULT_ASSIGNED_JQL =
-  "assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC";
+  "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC";
 
 export interface BoardCard extends z.infer<typeof BoardCardSchema> {}
 export interface CardRun extends z.infer<typeof CardRunSchema> {}

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createJiraAdapter, JiraApiError } from "../server/jira";
+import { DEFAULT_ASSIGNED_JQL } from "../shared/settings";
 
 function jsonResponse(body: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
@@ -56,6 +57,19 @@ describe("createJiraAdapter", () => {
     const call = request.mock.calls[0] as unknown as [string, RequestInit];
     expect(call[0]).toContain("/rest/api/3/search/jql");
     expect(JSON.parse(String(call[1].body)).jql).toBe("project = CC ORDER BY rank");
+  });
+
+  it("keeps finished work out of the default list", async () => {
+    const request = vi.fn(async () => jsonResponse({ issues: [] }));
+    const adapter = createJiraAdapter(
+      { ...config, defaultJql: DEFAULT_ASSIGNED_JQL },
+      request as unknown as typeof fetch,
+    );
+    await adapter.listAssigned();
+    const call = request.mock.calls[0] as unknown as [string, RequestInit];
+    // Done issues keep their assignee and sort to the top by `updated`, so the
+    // picker filled up with unpickable archive rows whenever resolution was unset.
+    expect(JSON.parse(String(call[1].body)).jql).toContain("statusCategory != Done");
   });
 
   it("resolves exact keys via the issue endpoint through search", async () => {

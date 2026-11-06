@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, View, useWindowDimensions, type TextInput } from "react-native";
+import { Animated, Pressable, ScrollView, Text, View, useWindowDimensions, type TextInput } from "react-native";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { boardCapabilitiesRpc, boardStopRpc, githubGetRpc, issueSearchRpc, linearSearchRpc } from "../shared/contracts";
 import { newCardId, type BoardCard } from "../shared/settings";
-import { doneThisWeek, localDay, staleCards } from "../shared/day";
+import { clearedToday, doneThisWeek, doneTodayCount, localDay, staleCards } from "../shared/day";
 import { parseQuickAdd } from "../shared/tracker";
 import { buildGroups, insertAtGroupEnd, isDuplicate, placeCard, showHeader, type CardGroup } from "../shared/groups";
 import { useAgentDirectory, useTicker, type AgentEntry } from "./agent-directory";
@@ -19,7 +19,7 @@ import { QuickAdd } from "./quick-add";
 import { JiraSheet } from "./jira-sheet";
 import { GitHubSheet } from "./github-sheet";
 import { LinearSheet } from "./linear-sheet";
-import { Chip, GroupLabel, monoFont } from "./ui";
+import { Chip, GroupLabel, monoFont, useReduceMotion } from "./ui";
 
 /**
  * The board: Today list on the left (~60%), live rail on the right, and a
@@ -119,11 +119,27 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   const today = localDay(new Date());
   const cards = board.values.cards;
 
-  const { todayCards, done, stale } = useMemo(
+  /**
+   * Keys already on the board, so a channel sheet can show them as inert
+   * instead of letting a tap discover the duplicate. Archived cards are out:
+   * the dedupe rule treats them as absent, so they can come back.
+   */
+  const onBoardKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const card of cards) {
+      if (card.archivedAt) continue;
+      if (card.jiraKey) keys.add(card.jiraKey);
+      if (card.github) keys.add(`${card.github.repo}#${card.github.number}`);
+    }
+    return keys;
+  }, [cards]);
+
+  const { todayCards, done, stale, doneToday } = useMemo(
     () => ({
       todayCards: cards.filter((card) => !card.archivedAt && card.day >= today),
       done: doneThisWeek(cards, new Date()),
       stale: staleCards(cards, today),
+      doneToday: doneTodayCount(cards, today),
     }),
     [cards, today],
   );
@@ -374,6 +390,14 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
       <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, flexShrink: 1 }} numberOfLines={1}>
         {weekday}
       </Text>
+      {/* The day's wins stay on screen while the list shrinks; archiving
+          otherwise reads as things disappearing, not things getting done. */}
+      {doneToday > 0 && todayCards.length > 0 ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+          <Icon name="Check" size={11} color={theme.colors.statusSuccess} />
+          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{doneToday} done</Text>
+        </View>
+      ) : null}
       <View style={{ flex: 1 }} />
       {/* Wide desktop's channel entry is the dock; stacked layouts have none. */}
       {stacked ? channelButton("jira", "Jira") : null}
@@ -397,6 +421,8 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     todayCards.length === 0 && !needMigration ? (
       <EmptyToday
         theme={theme}
+        cleared={clearedToday(cards, today)}
+        doneToday={doneToday}
         onAddFromJira={() => setOpenChannel("jira")}
         onNewPrompt={() => quickAddInput.current?.focus()}
       />
@@ -445,7 +471,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     done.length > 0 ? (
       <View style={{ marginTop: 10, paddingHorizontal: 12 }}>
         <View style={{ height: 1, backgroundColor: theme.colors.border, marginBottom: 8 }} />
-        <GroupLabel theme={theme} text="Done this week" />
+        <GroupLabel theme={theme} text={`Done this week · ${done.length}`} />
         {done.map((card) => (
           <Pressable
             key={card.id}
@@ -491,7 +517,12 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
       onStop={(agentId) => void handleStop(agentId)}
       onDismiss={(agentId, stamp) => void board.dismissAttention(agentId, stamp)}
       onRespondPermission={(agentId, requestId, response) => void handleRespondPermission(agentId, requestId, response)}
-      onCompleteManualGate={(id) => void board.removeManualGate(id).then((reason) => reason && setError(`Couldn't save — ${reason}`))}
+      onCompleteManualGate={(id) =>
+        board.removeManualGate(id).then((reason) => {
+          if (reason) setError(`Couldn't save — ${reason}`);
+          return reason === null;
+        })
+      }
       onClearDoneNag={(key) => void board.clearDoneNag(key).then((reason) => reason && setError(`Couldn't save — ${reason}`))}
     />
   );
@@ -502,21 +533,24 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
         theme={theme}
         open={openChannel === "jira"}
         onOpenChange={(open) => setOpenChannel(open ? "jira" : null)}
-        onPick={(issue) => void addCardFromIssue(issue, "jira")}
+        onBoard={onBoardKeys}
+        onPick={(issue) => addCardFromIssue(issue, "jira")}
         onOpenSettings={onOpenSettings}
       />
       <GitHubSheet
         theme={theme}
         open={openChannel === "github"}
         onOpenChange={(open) => setOpenChannel(open ? "github" : null)}
-        onPick={(pr) => void addCardFromPr(pr)}
+        onBoard={onBoardKeys}
+        onPick={(pr) => addCardFromPr(pr)}
         onOpenSettings={onOpenSettings}
       />
       <LinearSheet
         theme={theme}
         open={openChannel === "linear"}
         onOpenChange={(open) => setOpenChannel(open ? "linear" : null)}
-        onPick={(issue) => void addCardFromIssue(issue, "linear")}
+        onBoard={onBoardKeys}
+        onPick={(issue) => addCardFromIssue(issue, "linear")}
         onOpenSettings={onOpenSettings}
       />
     </>
@@ -653,18 +687,68 @@ function MigrationBanner({
 
 function EmptyToday({
   theme,
+  cleared,
+  doneToday,
   onAddFromJira,
   onNewPrompt,
 }: {
   theme: PluginTheme;
+  /** Today's cards were all archived: a finished day, not a fresh morning. */
+  cleared: boolean;
+  doneToday: number;
   onAddFromJira(): void;
   onNewPrompt(): void;
 }) {
+  // Clearing the list is the board's one earned celebration: the check lands
+  // with a single settle, then holds still. Never loops, never replays on
+  // relayout (the mount is the moment).
+  const reduceMotion = useReduceMotion();
+  const settle = useRef(new Animated.Value(cleared && !reduceMotion ? 0 : 1)).current;
+  useEffect(() => {
+    if (!cleared || reduceMotion) {
+      settle.setValue(1);
+      return;
+    }
+    const animation = Animated.spring(settle, { toValue: 1, friction: 6, tension: 140, useNativeDriver: true });
+    animation.start();
+    return () => animation.stop();
+  }, [settle, cleared, reduceMotion]);
+
+  const beforeNoon = new Date().getHours() < 12;
+  const clearedCopy = beforeNoon
+    ? "Cleared before noon. The afternoon is yours; add more only if you want it."
+    : "Everything on today's list is done. Add more only if the day isn't actually over.";
+
   return (
     <View style={{ padding: 24, gap: 8 }}>
-      <Text style={{ color: theme.colors.foreground, fontSize: 16, fontWeight: "600" }}>What&apos;s today?</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        {cleared ? (
+          <Animated.View
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 10,
+              backgroundColor: theme.colors.statusSuccess,
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: settle,
+              transform: [{ scale: settle.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }],
+            }}
+          >
+            <Icon name="Check" size={13} color={theme.colors.surface0} />
+          </Animated.View>
+        ) : null}
+        <Text style={{ color: theme.colors.foreground, fontSize: 16, fontWeight: "600" }}>
+          {cleared ? "Day's clear." : "What's today?"}
+        </Text>
+        {cleared && doneToday > 0 ? (
+          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>
+            {doneToday} done
+          </Text>
+        ) : null}
+      </View>
       <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-        Pull the day&apos;s commitments in from Jira, or write a prompt card below.
+        {cleared ? clearedCopy : "Pull the day's commitments in from Jira, or write a prompt card below."}
       </Text>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4 }}>
         <Pressable

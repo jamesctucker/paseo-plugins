@@ -13,19 +13,30 @@ export { agentLabel };
 /** The theme carries colors only, so the mono key face is picked per platform. */
 export const monoFont = Platform.select({ ios: "Menlo", default: "monospace" });
 
-/** The board's one repeating motion: a soft opacity pulse on live agents. */
-export function PulseDot({ color }: { color: string }) {
-  const opacity = useRef(new Animated.Value(1)).current;
+/**
+ * The host's reduce-motion preference, read once and kept live. Every board
+ * animation asks this first: motion is a garnish, never the only signal.
+ */
+export function useReduceMotion(): boolean {
   const [reduceMotion, setReduceMotion] = useState(false);
   useEffect(() => {
     let mounted = true;
     void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
       if (mounted) setReduceMotion(enabled);
     });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
     return () => {
       mounted = false;
+      subscription.remove();
     };
   }, []);
+  return reduceMotion;
+}
+
+/** The board's one repeating motion: a soft opacity pulse on live agents. */
+export function PulseDot({ color }: { color: string }) {
+  const opacity = useRef(new Animated.Value(1)).current;
+  const reduceMotion = useReduceMotion();
   useEffect(() => {
     if (reduceMotion) return;
     const loop = Animated.loop(

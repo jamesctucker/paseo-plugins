@@ -137,13 +137,30 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
     });
   }
 
+  /**
+   * Archive, and mark the moment when it empties Today. The board's cleared
+   * state celebrates on its own, but archiving from here keeps you on this
+   * screen, so the last card of the day would otherwise land in silence.
+   */
+  function saveArchive(next: typeof cards) {
+    const today = localDay(new Date());
+    const clearsDay = !next.some((entry) => !entry.archivedAt && entry.day >= today);
+    void board.saveCards(next).then((reason) => {
+      if (reason) {
+        toast.show(`Couldn't save — ${reason}`, { variant: "error" });
+        return;
+      }
+      if (clearsDay) toast.show("That was the last one. Day's clear.", { variant: "success" });
+    });
+  }
+
   function archiveAll() {
     // `card` is non-null at render time, but hoisted closures don't inherit
     // the early-return narrowing.
     const key = card ? cardKey(card) : null;
     if (!key) return;
     const stamp = new Date().toISOString();
-    save(cards.map((entry) => (!entry.archivedAt && cardKey(entry) === key ? { ...entry, archivedAt: stamp } : entry)));
+    saveArchive(cards.map((entry) => (!entry.archivedAt && cardKey(entry) === key ? { ...entry, archivedAt: stamp } : entry)));
   }
 
   const runStartedAt = card.runs.length > 0 ? Date.parse(card.runs[card.runs.length - 1].startedAt) : null;
@@ -467,7 +484,8 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
                   ? { ...entry, archivedAt: card.archivedAt ? null : new Date().toISOString() }
                   : entry,
               );
-              save(next);
+              if (card.archivedAt) save(next);
+              else saveArchive(next);
             }}
             style={{
               backgroundColor: theme.colors.surface1,

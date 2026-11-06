@@ -20,15 +20,31 @@ export interface QuickAddProps {
   inputRef?: Ref<TextInput>;
 }
 
+/**
+ * The field's syntax is richer than one placeholder can say. The canonical
+ * hint shows first; each successful add advances to the next, so the task,
+ * gate, and PR forms surface through use instead of documentation.
+ */
+const HINTS = [
+  { wide: "Task or Jira key (PROJ-142)…", compact: "Task or key…" },
+  { wide: "PROJ-142: a task under that issue…", compact: "KEY: task…" },
+  { wide: "! a reminder only you can clear…", compact: "! reminder…" },
+  { wide: "owner/repo#12 to add a pull request…", compact: "org/repo#12…" },
+];
+
 export function QuickAdd({ theme, compact, busy, error, onSubmit, onOpenSettings, inputRef }: QuickAddProps) {
   const [text, setText] = useState("");
+  const [hint, setHint] = useState(0);
   const authFailure = error !== null && /token|configured|rejected/i.test(error);
 
   async function submit() {
     const value = text.trim();
     if (!value || busy) return;
     const ok = await onSubmit(value);
-    if (ok) setText("");
+    if (ok) {
+      setText("");
+      setHint((current) => (current + 1) % HINTS.length);
+    }
   }
 
   return (
@@ -39,7 +55,7 @@ export function QuickAdd({ theme, compact, busy, error, onSubmit, onOpenSettings
           value={text}
           onChangeText={setText}
           onSubmitEditing={() => void submit()}
-          placeholder={compact ? "Task or key…" : "Task or Jira key (PROJ-142)…"}
+          placeholder={compact ? HINTS[hint].compact : HINTS[hint].wide}
           placeholderTextColor={theme.colors.foregroundMuted}
           autoCapitalize="characters"
           autoCorrect={false}

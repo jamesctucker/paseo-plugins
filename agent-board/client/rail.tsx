@@ -41,7 +41,8 @@ export interface RailProps {
   onStop(agentId: string): void;
   onDismiss(agentId: string, stamp: string): void;
   onRespondPermission(agentId: string, requestId: string, response: PermissionResponse): void;
-  onCompleteManualGate(id: string): void;
+  /** Resolves false when the removal did not save, so the row can uncheck. */
+  onCompleteManualGate(id: string): Promise<boolean>;
   onClearDoneNag(key: string): void;
 }
 
@@ -50,6 +51,9 @@ interface RailRowData {
   card: BoardCard;
   startedAt: number | null;
 }
+
+/** Long enough to see the fill land, short enough to never feel like a wait. */
+const CHECK_HOLD_MS = 320;
 
 function railLabel(reason: string | null): string {
   if (reason === "permission") return "Needs you";
@@ -314,18 +318,31 @@ function GateRow({
 }: {
   theme: PluginTheme;
   gate: Gate;
-  onCompleteManualGate(id: string): void;
+  /** Resolves false when the removal did not save, so the row can uncheck. */
+  onCompleteManualGate(id: string): Promise<boolean>;
   onClearDoneNag(key: string): void;
 }) {
+  const [checked, setChecked] = useState(false);
   const url = gateUrl(gate);
   const label = gateLabel(gate);
   const body = (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 5, paddingHorizontal: 4 }}>
       {gate.kind === "manual" ? (
         <Pressable
-          accessibilityRole="button"
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked }}
           accessibilityLabel={`Check off ${gate.text}`}
-          onPress={() => onCompleteManualGate(gate.id.replace(/^manual:/, ""))}
+          disabled={checked}
+          onPress={() => {
+            // The box fills before the row leaves, so the check-off reads as
+            // done rather than as the reminder vanishing.
+            setChecked(true);
+            setTimeout(() => {
+              void onCompleteManualGate(gate.id.replace(/^manual:/, "")).then((ok) => {
+                if (!ok) setChecked(false);
+              });
+            }, CHECK_HOLD_MS);
+          }}
           hitSlop={6}
         >
           <View
@@ -334,15 +351,25 @@ function GateRow({
               height: 12,
               borderRadius: 3,
               borderWidth: 1,
-              borderColor: theme.colors.foregroundMuted,
+              borderColor: checked ? theme.colors.statusSuccess : theme.colors.foregroundMuted,
+              backgroundColor: checked ? theme.colors.statusSuccess : "transparent",
+              alignItems: "center",
+              justifyContent: "center",
             }}
-          />
+          >
+            {checked ? <Icon name="Check" size={9} color={theme.colors.surface0} /> : null}
+          </View>
         </Pressable>
       ) : (
         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: gateColor(theme, gate) }} />
       )}
       <Text
-        style={{ color: theme.colors.foreground, fontSize: 12, flexShrink: 1 }}
+        style={{
+          color: checked ? theme.colors.foregroundMuted : theme.colors.foreground,
+          fontSize: 12,
+          flexShrink: 1,
+          textDecorationLine: checked ? "line-through" : "none",
+        }}
         numberOfLines={gate.kind === "manual" ? 2 : 1}
       >
         {gateTitle(gate)}

@@ -1,138 +1,30 @@
-import { useCallback, useEffect, useState } from "react";
-import { Pressable, Text, View } from "react-native";
-import { Icon, Modal } from "@getpaseo/plugin/client/ui";
-import type { PluginTheme } from "@getpaseo/plugin";
+import { useCallback } from "react";
 import { useRpc } from "@getpaseo/plugin/client";
-import { linearListRpc } from "../shared/contracts";
-import { monoFont } from "./ui";
-import type { IssueSummary } from "../shared/tracker";
+import { linearListRpc, linearSearchRpc } from "../shared/contracts";
+import { TrackerPicker, type TrackerPickerProps } from "./tracker-picker";
 
-/**
- * Add-from-Linear sheet: the assigned-to-me list, minus completed and
- * canceled. Skeleton rows while loading, and an inline auth banner that opens
- * the token config. Mirrors the Jira and GitHub sheets.
- */
+/** The Linear channel: assigned issues, minus completed and canceled. */
 
-export interface LinearSheetProps {
-  theme: PluginTheme;
-  open: boolean;
-  onOpenChange(open: boolean): void;
-  onPick(issue: IssueSummary): void;
-  onOpenSettings(): void;
-}
+export type LinearSheetProps = Pick<
+  TrackerPickerProps,
+  "theme" | "open" | "onOpenChange" | "onPick" | "onOpenSettings" | "onBoard"
+>;
 
-export function LinearSheet({ theme, open, onOpenChange, onPick, onOpenSettings }: LinearSheetProps) {
+export function LinearSheet(props: LinearSheetProps) {
   const listIssues = useRpc(linearListRpc);
-  const [items, setItems] = useState<IssueSummary[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { items: found } = await listIssues({});
-      setItems(found);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setLoading(false);
-    }
-    // listIssues identity is stable per installation
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (open && items === null && !loading && error === null) void load();
-  }, [open, items, loading, error, load]);
+  const searchIssues = useRpc(linearSearchRpc);
+  const list = useCallback(async () => (await listIssues({})).items, [listIssues]);
+  const search = useCallback(async (query: string) => (await searchIssues({ query })).items, [searchIssues]);
 
   return (
-    <Modal
+    <TrackerPicker
+      {...props}
       title="Add from Linear"
-      icon={<Icon name="Layers" size={16} color={theme.colors.foreground} />}
-      open={open}
-      onOpenChange={onOpenChange}
-    >
-      <Modal.Content>
-        <View style={{ gap: 2, paddingVertical: 8 }}>
-          {loading ? (
-            <View>{[0, 1, 2, 3, 4].map((row) => SkeletonRow(theme, row))}</View>
-          ) : error !== null ? (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap", padding: 8 }}>
-              <Text style={{ color: theme.colors.statusDanger, fontSize: 12, flexShrink: 1 }}>{error}</Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Open token config"
-                onPress={() => {
-                  onOpenChange(false);
-                  onOpenSettings();
-                }}
-              >
-                <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>Open token config</Text>
-              </Pressable>
-            </View>
-          ) : (items ?? []).length === 0 ? (
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, padding: 8 }}>
-              Nothing assigned to you in Linear.
-            </Text>
-          ) : (
-            (items ?? []).map((issue) => (
-              <Pressable
-                key={issue.id}
-                accessibilityRole="button"
-                accessibilityLabel={issue.title}
-                onPress={() => {
-                  onPick(issue);
-                  onOpenChange(false);
-                }}
-                style={({ pressed }) => ({
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 8,
-                  paddingVertical: 7,
-                  paddingHorizontal: 8,
-                  borderRadius: 8,
-                  opacity: pressed ? 0.7 : 1,
-                })}
-              >
-                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontFamily: monoFont }}>
-                  {issue.identifier}
-                </Text>
-                <Text
-                  style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "500", flexShrink: 1 }}
-                  numberOfLines={1}
-                >
-                  {issue.title}
-                </Text>
-                <View style={{ flex: 1 }} />
-                {issue.status ? (
-                  <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{issue.status}</Text>
-                ) : null}
-              </Pressable>
-            ))
-          )}
-          <Pressable accessibilityRole="button" accessibilityLabel="Refresh Linear list" onPress={() => void load()} style={{ padding: 8 }}>
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>Refresh</Text>
-          </Pressable>
-        </View>
-      </Modal.Content>
-    </Modal>
-  );
-}
-
-function SkeletonRow(theme: PluginTheme, key: number) {
-  return (
-    <View key={key} style={{ flexDirection: "row", gap: 8, paddingVertical: 8, paddingHorizontal: 8 }}>
-      <View style={{ width: 58, height: 10, borderRadius: 5, backgroundColor: theme.colors.surface2 }} />
-      <View
-        style={{
-          height: 10,
-          borderRadius: 5,
-          backgroundColor: theme.colors.surface2,
-          flex: 1,
-          maxWidth: 140 + key * 12,
-        }}
-      />
-    </View>
+      icon="Layers"
+      searchPlaceholder="Search by key or text"
+      emptyMessage="Nothing assigned to you in Linear."
+      list={list}
+      search={search}
+    />
   );
 }

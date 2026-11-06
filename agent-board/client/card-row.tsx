@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Animated, Pressable, Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { BoardCard } from "../shared/settings";
 import { formatElapsed } from "../shared/day";
-import { Chip, PulseDot, SourceTag, agentLabel, monoFont, sourceGlyph, statusColor } from "./ui";
+import { Chip, PulseDot, SourceTag, agentLabel, monoFont, sourceGlyph, statusColor, useReduceMotion } from "./ui";
 import type { AgentEntry } from "./agent-directory";
 
 /**
@@ -15,6 +15,9 @@ import type { AgentEntry } from "./agent-directory";
  * tap-to-place reorder flow; the chevron always means detail and the live
  * chip is the agent shortcut.
  */
+
+/** How long after creation a card still counts as "just added" for the rise. */
+const LANDING_WINDOW_MS = 1_200;
 
 export interface CardRowProps {
   theme: PluginTheme;
@@ -45,6 +48,20 @@ export function CardRow({
   onOpenAgent,
 }: CardRowProps) {
   const [hovered, setHovered] = useState(false);
+  // A card born seconds ago lands with a short rise instead of teleporting in.
+  // createdAt, not a mount flag: reorders and relayouts never replay it.
+  const [landing] = useState(() => Date.now() - Date.parse(card.createdAt) < LANDING_WINDOW_MS);
+  const reduceMotion = useReduceMotion();
+  const appear = useRef(new Animated.Value(landing && !reduceMotion ? 0 : 1)).current;
+  useEffect(() => {
+    if (!landing || reduceMotion) {
+      appear.setValue(1);
+      return;
+    }
+    const animation = Animated.timing(appear, { toValue: 1, duration: 180, useNativeDriver: true });
+    animation.start();
+    return () => animation.stop();
+  }, [appear, landing, reduceMotion]);
   const styles = useMemo(
     () => ({
       card: {
@@ -94,46 +111,56 @@ export function CardRow({
   );
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={card.title}
-      onPress={onPress}
-      onLongPress={onLongPress}
-      onHoverIn={() => setHovered(true)}
-      onHoverOut={() => setHovered(false)}
-      style={({ pressed }) => [styles.card, { opacity: pressed ? 0.8 : 1 }]}
+    <Animated.View
+      style={{
+        opacity: appear,
+        transform: [{ translateY: appear.interpolate({ inputRange: [0, 1], outputRange: [3, 0] }) }],
+      }}
     >
-      <View style={styles.meta}>
-        {!compact && onLongPress && (hovered || active) ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Reorder card" onPress={onLongPress} hitSlop={4}>
-            <Icon name="GripVertical" size={12} color={theme.colors.foregroundMuted} />
-          </Pressable>
-        ) : null}
-        <Icon name={sourceGlyph(card.source)} size={14} color={theme.colors.foregroundMuted} />
-        <SourceTag theme={theme} source={card.source} />
-        {card.source === "linear" ? (
-          // The rote/creative doctrine lives on the card; unrouted is shown
-          // so a missing Route tag reads as a nudge, not an absence.
-          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>{card.route ?? "unrouted"}</Text>
-        ) : null}
-        {keyText ? (
-          <Text style={styles.key} numberOfLines={1}>
-            {keyText}
-          </Text>
-        ) : null}
-        <View style={styles.spacer} />
-        {!grouped && card.jiraStatus ? (
-          // Long tracker statuses ("Developer Review") are the meta line's
-          // most expendable element, so they ellipsize before anything else.
-          <Chip theme={theme} text={card.jiraStatus} color={theme.colors.foregroundMuted} style={{ flexShrink: 1 }} />
-        ) : null}
-        {chip}
-        <Icon name="ChevronRight" size={14} color={theme.colors.foregroundMuted} />
-      </View>
-      <Text style={styles.title} numberOfLines={2}>
-        {card.title}
-      </Text>
-    </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={card.title}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        onHoverIn={() => setHovered(true)}
+        onHoverOut={() => setHovered(false)}
+        style={({ pressed }) => [
+          styles.card,
+          { opacity: pressed ? 0.8 : 1, transform: [{ translateY: pressed ? 1 : 0 }] },
+        ]}
+      >
+        <View style={styles.meta}>
+          {!compact && onLongPress && (hovered || active) ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Reorder card" onPress={onLongPress} hitSlop={4}>
+              <Icon name="GripVertical" size={12} color={theme.colors.foregroundMuted} />
+            </Pressable>
+          ) : null}
+          <Icon name={sourceGlyph(card.source)} size={14} color={theme.colors.foregroundMuted} />
+          <SourceTag theme={theme} source={card.source} />
+          {card.source === "linear" ? (
+            // The rote/creative doctrine lives on the card; unrouted is shown
+            // so a missing Route tag reads as a nudge, not an absence.
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10 }}>{card.route ?? "unrouted"}</Text>
+          ) : null}
+          {keyText ? (
+            <Text style={styles.key} numberOfLines={1}>
+              {keyText}
+            </Text>
+          ) : null}
+          <View style={styles.spacer} />
+          {!grouped && card.jiraStatus ? (
+            // Long tracker statuses ("Developer Review") are the meta line's
+            // most expendable element, so they ellipsize before anything else.
+            <Chip theme={theme} text={card.jiraStatus} color={theme.colors.foregroundMuted} style={{ flexShrink: 1 }} />
+          ) : null}
+          {chip}
+          <Icon name="ChevronRight" size={14} color={theme.colors.foregroundMuted} />
+        </View>
+        <Text style={styles.title} numberOfLines={2}>
+          {card.title}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 

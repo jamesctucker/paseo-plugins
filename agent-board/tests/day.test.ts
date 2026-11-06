@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { carryOver, doneThisWeek, dropStale, formatElapsed, formatRelative, localDay, staleCards } from "../shared/day";
+import { carryOver, doneThisWeek, doneTodayCount, dropStale, formatElapsed, formatRelative, localDay, staleCards } from "../shared/day";
 
 describe("localDay", () => {
   it("formats a local date as YYYY-MM-DD", () => {
@@ -59,6 +59,19 @@ describe("doneThisWeek", () => {
   it("ages boundary cards out at seven days", () => {
     const cards = [{ id: "edge", day: "2026-10-01", archivedAt: "2026-10-28T09:00:00Z" }];
     expect(doneThisWeek(cards, now)).toEqual([]);
+  });
+});
+
+describe("doneTodayCount", () => {
+  it("counts cards archived on the local today, including carried-over ones", () => {
+    const today = localDay(new Date(2026, 10, 6, 15));
+    const cards = [
+      { day: "2026-11-06", archivedAt: new Date(2026, 10, 6, 9).toISOString() },
+      { day: "2026-11-04", archivedAt: new Date(2026, 10, 6, 10).toISOString() },
+      { day: "2026-11-05", archivedAt: new Date(2026, 10, 5, 17).toISOString() },
+      { day: "2026-11-06", archivedAt: null },
+    ];
+    expect(doneTodayCount(cards, today)).toBe(2);
   });
 });
 

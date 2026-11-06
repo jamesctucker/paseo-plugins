@@ -46,6 +46,19 @@ export function doneThisWeek<T extends DatedCard>(
   });
 }
 
+/**
+ * Cards archived on the local `today`, whatever day they were born on: a
+ * carried-over card finished this morning is today's win. Feeds the header
+ * tally and the cleared-day state, so wins stay visible as the list shrinks.
+ */
+export function doneTodayCount(cards: readonly DatedCard[], today: string): number {
+  let count = 0;
+  for (const card of cards) {
+    if (card.archivedAt && localDay(new Date(card.archivedAt)) === today) count++;
+  }
+  return count;
+}
+
 export function formatElapsed(startedAtMs: number, nowMs: number): string {
   const delta = Math.max(0, nowMs - startedAtMs);
   const minutes = Math.floor(delta / 60_000);
@@ -71,4 +84,20 @@ export function formatRelative(startedAtMs: number, nowMs: number): string {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
   return new Date(startedAtMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/**
+ * True when today's list is empty because the day's cards were all archived,
+ * not because nothing was ever added. Drives the board's "Day's clear." state.
+ * A dropped migration leaves no archived card dated today, so it still reads
+ * as a first-run morning rather than a finished day.
+ */
+export function clearedToday<T extends DatedCard>(cards: readonly T[], today: string): boolean {
+  let archivedToday = false;
+  for (const card of cards) {
+    if (card.day < today) continue;
+    if (!card.archivedAt) return false;
+    if (card.day === today) archivedToday = true;
+  }
+  return archivedToday;
 }
