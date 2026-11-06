@@ -1,8 +1,8 @@
 # Agent Board
 
 A [Paseo](https://paseo.sh) plugin: a daily execution board for one person. Today's committed
-work on the left (Jira mirror + local prompt cards), live agents on the right. Complements a
-paper bullet journal; it never replaces the tracker or the plan.
+work on the left (Jira, GitHub, and Linear cards plus local prompt cards), live agents on the
+right. Complements a paper bullet journal; it never replaces the tracker or the plan.
 
 - **Today list**: transcribed each morning. Quick-add accepts a Jira key (`PROJ-142`), a GitHub
   pull reference (`owner/repo#123`), or plain text as a prompt card. Unfinished cards from
@@ -18,17 +18,19 @@ paper bullet journal; it never replaces the tracker or the plan.
   moves; the sidebar count folds them in.
 - **Live rail**: board-spawned agents only, Running above Review, with a pulse + elapsed chip.
   Nothing running reads as two quiet words.
-- **Run loop**: card → source picker (existing workspace / repo path / PR worktree via
-  SDK-native `checkoutSource`) with a **pre-seeded, editable prompt** — the human layer before
-  anything runs — then workspace + agent whose first message is that text → the card mirrors
-  the agent's state. Each tracker spawns on its own model lane (work for Jira, personal for
-  Linear), and creative or unrouted Linear cards ask once before spawning. Finished agents
-  land in Review; Open jumps to the agent in Paseo.
+- **Run loop**: card → a short form (workspace, **pre-seeded editable prompt**, model,
+  thinking level) with one Run button (Cmd+Enter on desktop). The workspace defaults to the
+  most recent one; its picker also takes a repo path (checked before anything is created) or a
+  PR worktree via SDK-native `checkoutSource`. The agent's first message is the prompt text,
+  and the card mirrors the agent's state. Each tracker spawns on its own model lane (work for
+  Jira, personal for Linear), overridable per run, and creative or unrouted Linear cards ask
+  once before spawning. Finished agents land in Review; Open jumps to the agent in Paseo.
 - **Chains**: a Linear card's detail shows its whole chain — every issue in the project with
   state, in delegation order — so a stalled chain's resume point is one tap away.
 - **Channel dock**: the integrations live as icons at the board's right edge (Jira, GitHub,
-  Linear). Each opens its sheet — assigned Jira issues, open PRs assigned to or created by you,
-  or your assigned Linear issues. On phone the channels are buttons in the Today header.
+  Linear). Each opens its sheet — assigned Jira issues, open PRs assigned to, created by, or
+  awaiting review from you, or your assigned Linear issues. Items already on the board show as
+  added instead of duplicating. On phone the channels are buttons in the Today header.
 - **Zero write-back**: tracker status is a read-only badge. The board never mutates a tracker.
 - **Attachment sources**: `Attach a Jira issue`, `Attach a GitHub PR`, and `Attach a Linear issue`
   in the composer resolve through the same search adapters the board uses.
@@ -40,7 +42,7 @@ sit behind one plain adapter interface.
 ## Install
 
 ```bash
-paseo plugin install github:jamesctucker/paseo-plugins --ref main
+paseo plugin add git:jamesctucker/paseo-plugins:agent-board
 ```
 
 Or install from a local checkout:
@@ -53,9 +55,9 @@ paseo plugin install /absolute/path/to/paseo-plugins/agent-board
 
 Settings → Plugins → Agent Board:
 
-- **Site domain**: `acme` or a full host when self-hosted
+- **Site domain**: your site name (`acme` for `acme.atlassian.net`), a host, or a pasted URL
 - **Email + API token**: Atlassian API token (Basic auth); stays daemon-side
-- **Assigned JQL**: optional override of `assignee = currentUser() AND resolution = Unresolved`
+- **Assigned JQL**: optional override of `assignee = currentUser() AND statusCategory != Done`
 - **GitHub personal access token**: token with `repo` scope; stays daemon-side
 - **Linear API key**: Linear personal API key; stays daemon-side
 - **Spawn providers**: `provider/model` per lane — Jira cards (work lane, default
@@ -72,5 +74,4 @@ npm test           # vitest, pure modules only
 paseo plugin reload agent-board
 ```
 
-Requires Paseo `>=0.15.0`. Design brief: `artifacts/45-agent-board-design.md` (workspace-local).
-MIT licensed; see `../LICENSE`.
+Requires Paseo `>=0.15.0`. MIT licensed; see `../LICENSE`.
