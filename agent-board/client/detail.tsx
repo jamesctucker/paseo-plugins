@@ -418,13 +418,19 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
                     : null}
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={runsExpanded ? "Hide previous runs" : `Show ${card.runs.length - 1} previous runs`}
+                    accessibilityLabel={
+                      runsExpanded
+                        ? "Hide previous runs"
+                        : `Show ${card.runs.length - 1} previous ${card.runs.length === 2 ? "run" : "runs"}`
+                    }
                     onPress={() => setRunsExpanded(!runsExpanded)}
                     hitSlop={4}
                     style={{ paddingVertical: 3 }}
                   >
                     <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
-                      {runsExpanded ? "Hide previous runs" : `${card.runs.length - 1} previous runs`}
+                      {runsExpanded
+                        ? "Hide previous runs"
+                        : `${card.runs.length - 1} previous ${card.runs.length === 2 ? "run" : "runs"}`}
                     </Text>
                   </Pressable>
                 </>
@@ -667,29 +673,41 @@ function RunRow({
 }) {
   const started = Date.parse(run.startedAt);
   const when = formatRelative(started, now);
-  const label = agent ? agentLabel(agent) : "Agent closed";
+  const label = agent ? agentLabel(agent) : "archived";
   const color = agent ? agentColor(theme, agent) : theme.colors.foregroundMuted;
   const live = agent?.status === "running" || agent?.status === "initializing";
+  // The name is what tells runs apart. An archived agent leaves the
+  // directory and takes its name with it, so the row says that instead.
+  const name = agent ? (agent.title ?? "Untitled agent") : "Archived agent";
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open agent, ${label}, ${when}`}
+      accessibilityLabel={`Open agent ${name}, ${label}, ${when}`}
       onPress={() => onOpen(run.agentId)}
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "center",
         gap: 8,
-        paddingVertical: 4,
+        paddingVertical: 5,
         opacity: pressed ? 0.7 : 1,
       })}
     >
-      <Text style={{ color, fontSize: 12, fontWeight: latest ? "600" : "400" }}>{label}</Text>
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{when}</Text>
-      {/* The latest row earns its tag: live gets the elapsed accent, closed
-          gets a muted marker. A bare word on an identical row was a lie. */}
-      {latest && live ? <Chip theme={theme} text={formatElapsed(started, now)} color={theme.colors.accent} /> : null}
-      {latest && !live ? <Chip theme={theme} text="latest" color={theme.colors.foregroundMuted} /> : null}
-      <View style={{ flex: 1 }} />
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Text
+          style={{ color: agent ? theme.colors.foreground : theme.colors.foregroundMuted, fontSize: 13, fontWeight: latest ? "600" : "500" }}
+          numberOfLines={1}
+        >
+          {name}
+        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          {agent ? <Text style={{ color, fontSize: 11, fontWeight: "600" }}>{label}</Text> : null}
+          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{when}</Text>
+          {/* The latest row earns its tag: live gets the elapsed accent, closed
+              gets a muted marker. A bare word on an identical row was a lie. */}
+          {latest && live ? <Chip theme={theme} text={formatElapsed(started, now)} color={theme.colors.accent} /> : null}
+          {latest && !live ? <Chip theme={theme} text="latest" color={theme.colors.foregroundMuted} /> : null}
+        </View>
+      </View>
       <Icon name="ChevronRight" size={12} color={theme.colors.foregroundMuted} />
     </Pressable>
   );
