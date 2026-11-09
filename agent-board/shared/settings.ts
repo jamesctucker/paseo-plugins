@@ -52,7 +52,7 @@ export const BoardCardSchema = z.object({
 export const boardDoc = defineSettings({
   id: "board",
   scope: "host",
-  version: 5,
+  version: 6,
   schema: z.object({
     cards: z.array(BoardCardSchema).default([]),
     /** Day the migration prompt was last answered, so it asks once per day. */
@@ -72,9 +72,12 @@ export const boardDoc = defineSettings({
     manualGates: z.record(z.string(), z.object({ text: z.string(), createdAt: z.string() })).default({}),
     /** Done-nag opt-outs: tracker key → cleared-at stamp. Rare by design. */
     clearedDoneNags: z.record(z.string(), z.string()).default({}),
+    /** Declined link offers: `cardId:agentId` → declined-at stamp. */
+    declinedLinks: z.record(z.string(), z.string()).default({}),
   }),
   // v2 added dismissedAttention, v3 added the linear card source, v4 added
-  // issueTitle, v5 added gates storage + the card route. Additive fields ride
+  // issueTitle, v5 added gates storage + the card route, v6 added
+  // declinedLinks. Additive fields ride
   // schema defaults; the only backfill is v4's issueTitle, since every pre-v4
   // tracker card was a whole-issue task whose title is the issue's.
   migrate: (values, fromVersion) => {

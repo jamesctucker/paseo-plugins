@@ -9,8 +9,9 @@ import { newCardId, type BoardCard } from "../shared/settings";
 import { clearedToday, doneThisWeek, doneTodayCount, localDay, staleCards } from "../shared/day";
 import { parseQuickAdd } from "../shared/tracker";
 import { buildGroups, insertAtGroupEnd, isDuplicate, placeCard, showHeader, type CardGroup } from "../shared/groups";
-import { useAgentDirectory, useTicker, type AgentEntry } from "./agent-directory";
+import { useAgentDirectory, useTicker, useWorkspaceTitles, type AgentEntry } from "./agent-directory";
 import { useBoardDoc } from "./board-doc";
+import { agentMatchText, linkSuggestions } from "../shared/links";
 import { useGates } from "./gates";
 import { CardRow } from "./card-row";
 import { ChannelDock, type Channel } from "./dock";
@@ -133,6 +134,18 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     }
     return keys;
   }, [cards]);
+
+  const workspaceTitles = useWorkspaceTitles(agents);
+  const suggestions = useMemo(
+    () => linkSuggestions(cards, agents, board.values.declinedLinks, workspaceTitles),
+    [cards, agents, board.values.declinedLinks, workspaceTitles],
+  );
+
+  async function linkSuggested(card: BoardCard, agent: AgentEntry) {
+    const reason = await board.linkAgent(card.id, agent);
+    if (reason) toast.show(`Couldn't link — ${reason}`, { variant: "error" });
+    else toast.show(`Linked to ${card.jiraKey ?? (card.github ? `#${card.github.number}` : card.title)}`, { variant: "success" });
+  }
 
   const { todayCards, done, stale, doneToday } = useMemo(
     () => ({
@@ -452,6 +465,21 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
                 }}
                 onLongPress={() => setReorderId(reorderId === card.id ? null : card.id)}
                 onOpenAgent={card.runs.length > 0 ? () => openAgent(card.runs[card.runs.length - 1].agentId) : undefined}
+                suggestion={(() => {
+                  const agent = suggestions.get(card.id)?.[0];
+                  return agent ? (agentMatchText(agent, card, workspaceTitles) ?? agent.title ?? "Untitled agent") : null;
+                })()}
+                onLinkSuggestion={() => {
+                  const agent = suggestions.get(card.id)?.[0];
+                  return agent ? linkSuggested(card, agent) : Promise.resolve();
+                }}
+                onDeclineSuggestion={() => {
+                  const agent = suggestions.get(card.id)?.[0];
+                  if (!agent) return;
+                  void board.declineLink(card.id, agent.id).then((reason) => {
+                    if (reason) toast.show(`Couldn't save — ${reason}`, { variant: "error" });
+                  });
+                }}
               />
             );
           });

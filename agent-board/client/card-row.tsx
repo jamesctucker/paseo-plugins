@@ -32,6 +32,10 @@ export interface CardRowProps {
   onPress(): void;
   onLongPress?(): void;
   onOpenAgent?(): void;
+  /** The title of an unlinked agent (or its workspace) naming this card. */
+  suggestion?: string | null;
+  onLinkSuggestion?(): Promise<void>;
+  onDeclineSuggestion?(): void;
 }
 
 export function CardRow({
@@ -46,8 +50,12 @@ export function CardRow({
   onPress,
   onLongPress,
   onOpenAgent,
+  suggestion,
+  onLinkSuggestion,
+  onDeclineSuggestion,
 }: CardRowProps) {
   const [hovered, setHovered] = useState(false);
+  const [linking, setLinking] = useState(false);
   // A card born seconds ago lands with a short rise instead of teleporting in.
   // createdAt, not a mount flag: reorders and relayouts never replay it.
   const [landing] = useState(() => Date.now() - Date.parse(card.createdAt) < LANDING_WINDOW_MS);
@@ -159,6 +167,49 @@ export function CardRow({
         <Text style={styles.title} numberOfLines={2}>
           {card.title}
         </Text>
+        {suggestion && onLinkSuggestion && onDeclineSuggestion ? (
+          // An offer, not a link: the match is a title guess, so it waits for
+          // a tap and a decline sticks for this card/agent pair.
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 2,
+              paddingTop: 8,
+              borderTopWidth: 1,
+              borderTopColor: theme.colors.border,
+            }}
+          >
+            <Icon name="Link" size={12} color={theme.colors.foregroundMuted} />
+            <Text style={{ flex: 1, minWidth: 0, color: theme.colors.foregroundMuted, fontSize: 12 }} numberOfLines={1}>
+              Matching agent · {suggestion}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Link agent ${suggestion} to this card`}
+              disabled={linking}
+              hitSlop={6}
+              onPress={() => {
+                setLinking(true);
+                void onLinkSuggestion().finally(() => setLinking(false));
+              }}
+            >
+              <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600", opacity: linking ? 0.5 : 1 }}>
+                {linking ? "Linking…" : "Link"}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Not this agent"
+              disabled={linking}
+              hitSlop={6}
+              onPress={onDeclineSuggestion}
+            >
+              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Not this</Text>
+            </Pressable>
+          </View>
+        ) : null}
       </Pressable>
     </Animated.View>
   );

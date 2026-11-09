@@ -13,6 +13,7 @@ import { useAgentDirectory, useTicker, type AgentEntry } from "./agent-directory
 import { useBoardDoc } from "./board-doc";
 import { useGates } from "./gates";
 import { SpawnSheet } from "./spawn-sheet";
+import { LinkSheet } from "./link-sheet";
 import { GroupLabel, Chip, LinkRow, PulseDot, SourceTag, agentColor, agentLabel, monoFont, sourceGlyph } from "./ui";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 
@@ -40,6 +41,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
   const now = useTicker();
   const toast = useToast();
   const [spawnOpen, setSpawnOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
   const [deleteArmed, armDelete, disarmDelete] = useArmed();
   const [archiveArmed, armArchive, disarmArchive] = useArmed();
   const [archiveAllArmed, armArchiveAll, disarmArchiveAll] = useArmed();
@@ -56,6 +58,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
     disarmArchive();
     disarmArchiveAll();
     setRunsExpanded(false);
+    setLinkOpen(false);
     setTaskDraft("");
     // disarm identity is stable per mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -428,6 +431,18 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
               ) : null}
             </>
           )}
+          {/* Agents started from chat or another plugin can join the card
+              after the fact; the board only knows what it is told. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Link an existing agent to this card"
+            onPress={() => setLinkOpen(true)}
+            hitSlop={4}
+            style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 3, opacity: pressed ? 0.7 : 1 })}
+          >
+            <Icon name="Link" size={11} color={theme.colors.foregroundMuted} />
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>Link an existing agent…</Text>
+          </Pressable>
         </View>
       </ScrollView>
 
@@ -548,6 +563,19 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
           save(next);
         }}
         onOpenAgent={(agentId) => navigation?.openAgent({ agentId })}
+      />
+      <LinkSheet
+        theme={theme}
+        card={card}
+        cards={cards}
+        agents={agents}
+        open={linkOpen}
+        onOpenChange={setLinkOpen}
+        onLink={async (picked) => {
+          const reason = await board.linkAgent(card.id, picked);
+          if (!reason) toast.show("Agent linked", { variant: "success" });
+          return reason;
+        }}
       />
     </View>
   );

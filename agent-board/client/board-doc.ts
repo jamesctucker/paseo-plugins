@@ -1,9 +1,11 @@
 import { useCallback, useRef } from "react";
 import { settingsRpc } from "@getpaseo/plugin";
-import { useRpc, useSettings } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useSettings } from "@getpaseo/plugin/client";
 import type { SettingsState } from "@getpaseo/plugin/client";
 import { boardDoc, type BoardCard, type BoardValues } from "../shared/settings";
 import { carryOver, dropStale, localDay } from "../shared/day";
+import { declineKey } from "../shared/links";
+import type { AgentEntry } from "./agent-directory";
 
 /**
  * One board-document reader shared by the board and card-detail screens. Keeps
@@ -31,10 +33,14 @@ export interface BoardDoc {
   addManualGate(text: string): Promise<string | null>;
   removeManualGate(id: string): Promise<string | null>;
   clearDoneNag(key: string): Promise<string | null>;
+  /** Attach an agent the board didn't start as the card's latest run. */
+  linkAgent(cardId: string, agent: AgentEntry): Promise<string | null>;
+  declineLink(cardId: string, agentId: string): Promise<string | null>;
 }
 
 export function useBoardDoc(): BoardDoc {
   const settings = useSettings(boardDoc);
+  const paseo = usePaseo();
   const writeBoard = useRpc(boardWriteRpc);
   const lastGood = useRef<BoardValues>({
     cards: [],
@@ -42,6 +48,7 @@ export function useBoardDoc(): BoardDoc {
     dismissedAttention: {},
     manualGates: {},
     clearedDoneNags: {},
+    declinedLinks: {},
   });
 
   const state = settings as SettingsState<typeof boardDoc.schema>;
@@ -133,6 +140,41 @@ export function useBoardDoc(): BoardDoc {
     [values, saveValues],
   );
 
+  const linkAgent = useCallback(
+    async (cardId: string, agent: AgentEntry) => {
+      // The live directory usually carries the workspace; an older daemon's
+      // feed may not, so ask the agent itself before giving up.
+      let workspaceId = agent.workspaceId;
+      if (!workspaceId) {
+        try {
+          const handle = paseo.agents.ref(agent.id);
+          await handle.refresh();
+          workspaceId = handle.workspaceId;
+        } catch {
+          // Falls through to the error below.
+        }
+      }
+      if (!workspaceId) return "Couldn't find that agent's workspace";
+      const run = { agentId: agent.id, workspaceId, startedAt: agent.createdAt };
+      return saveValues({
+        ...values,
+        cards: values.cards.map((card) => (card.id === cardId ? { ...card, runs: [...card.runs, run] } : card)),
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [values, saveValues, paseo],
+  );
+
+  const declineLink = useCallback(
+    async (cardId: string, agentId: string) =>
+      saveValues({
+        ...values,
+        declinedLinks: { ...values.declinedLinks, [declineKey(cardId, agentId)]: new Date().toISOString() },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [values, saveValues],
+  );
+
   return {
     values,
     revision,
@@ -145,5 +187,7 @@ export function useBoardDoc(): BoardDoc {
     addManualGate,
     removeManualGate,
     clearDoneNag,
+    linkAgent,
+    declineLink,
   };
 }

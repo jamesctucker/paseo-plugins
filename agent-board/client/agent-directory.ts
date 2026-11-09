@@ -33,6 +33,11 @@ export interface AgentEntry {
   attentionReason: "finished" | "error" | "permission" | null;
   pendingPermissions: PermissionRequestLite[];
   updatedAt: string;
+  // Carried for linking agents the board didn't start: a run needs the
+  // workspace, and subagents are filtered out of link offers.
+  workspaceId: string | null;
+  createdAt: string;
+  parentAgentId: string | null;
 }
 
 interface DirectoryAgent {
@@ -44,6 +49,10 @@ interface DirectoryAgent {
   pendingPermissions?: PermissionRequestLite[];
   updatedAt: string;
   archivedAt?: string | null;
+  workspaceId?: string | null;
+  createdAt?: string;
+  parentAgentId?: string | null;
+  labels?: Record<string, string>;
 }
 
 interface DirectoryState {
@@ -82,6 +91,10 @@ function toEntry(agent: DirectoryAgent): AgentEntry {
     attentionReason: agent.attentionReason ?? null,
     pendingPermissions: agent.pendingPermissions ?? [],
     updatedAt: agent.updatedAt,
+    workspaceId: agent.workspaceId ?? null,
+    createdAt: agent.createdAt ?? agent.updatedAt,
+    // Subagents may carry their parent only as a label.
+    parentAgentId: agent.parentAgentId ?? agent.labels?.["paseo.parent-agent-id"] ?? null,
   };
 }
 
@@ -185,6 +198,40 @@ export function useAgentDirectory(): {
   const paseo = usePaseo();
   useEffect(() => acquire(paseo), [paseo]);
   return useSyncExternalStore(subscribe, () => store.state);
+}
+
+/**
+ * Workspace id → title, for matching agents whose workspace (not the agent)
+ * names a card. Refetches whenever an agent shows up in a workspace this map
+ * hasn't seen, which covers new workspaces without a second live feed.
+ */
+export function useWorkspaceTitles(agents: ReadonlyMap<string, AgentEntry>): ReadonlyMap<string, string> {
+  const paseo = usePaseo();
+  const [titles, setTitles] = useState<ReadonlyMap<string, string>>(new Map());
+  const unseen = [...agents.values()].some((agent) => agent.workspaceId && !titles.has(agent.workspaceId));
+  useEffect(() => {
+    if (!unseen) return;
+    let cancelled = false;
+    paseo.workspaces
+      .list()
+      .then(({ entries }) => {
+        if (cancelled) return;
+        const next = new Map<string, string>();
+        for (const workspace of entries) next.set(workspace.id, workspace.title ?? workspace.name);
+        // Agents whose workspace is gone would refetch forever; pin them to "".
+        for (const agent of agents.values()) {
+          if (agent.workspaceId && !next.has(agent.workspaceId)) next.set(agent.workspaceId, "");
+        }
+        setTitles(next);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // agents is read at resolve time; unseen is the trigger
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paseo, unseen]);
+  return titles;
 }
 
 /** Re-render on an interval so elapsed labels tick without manual refresh. */
