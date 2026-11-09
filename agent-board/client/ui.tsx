@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, Platform, Text, View, type TextStyle, type ViewStyle } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AccessibilityInfo, Animated, Platform, Pressable, Text, View, type TextStyle, type ViewStyle } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
+import { openExternalUrl } from "@getpaseo/plugin/client";
 import { agentLabel, type AgentStateLike } from "../shared/agent-label";
 
 export { agentLabel };
@@ -146,6 +147,25 @@ export function Chip({ theme, text, color, style, textStyle }: ChipProps) {
         {text}
       </Text>
     </View>
+  );
+}
+
+/**
+ * A whole row that opens a URL. The host's ExternalLink wraps its children in
+ * a label Text and appends an icon, which suits a short inline link but breaks
+ * a row: inside Text the row loses its width bound and truncation never kicks
+ * in, so long titles overflow their column.
+ */
+export function LinkRow({ href, accessibilityLabel, children }: { href: string; accessibilityLabel: string; children: ReactNode }) {
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={accessibilityLabel}
+      onPress={() => void openExternalUrl(href).catch(() => {})}
+      style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+    >
+      {children}
+    </Pressable>
   );
 }
 

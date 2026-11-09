@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { ExternalLink, Icon } from "@getpaseo/plugin/client/ui";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import type { BoardCard } from "../shared/settings";
 import { formatElapsed } from "../shared/day";
 import { isDismissed } from "../shared/lanes";
 import { gateUrl, type Gate } from "../shared/gates";
-import { GroupLabel, PulseDot, attentionColor, monoFont } from "./ui";
+import { GroupLabel, LinkRow, PulseDot, attentionColor, monoFont } from "./ui";
 import type { AgentEntry, PermissionRequestLite } from "./agent-directory";
 
 /**
@@ -394,9 +394,9 @@ function GateRow({
   );
   if (!url) return body;
   return (
-    <ExternalLink href={url} accessibilityLabel={gateTitle(gate)}>
+    <LinkRow href={url} accessibilityLabel={gateTitle(gate)}>
       {body}
-    </ExternalLink>
+    </LinkRow>
   );
 }
 

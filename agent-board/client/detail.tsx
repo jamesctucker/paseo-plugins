@@ -13,7 +13,7 @@ import { useAgentDirectory, useTicker, type AgentEntry } from "./agent-directory
 import { useBoardDoc } from "./board-doc";
 import { useGates } from "./gates";
 import { SpawnSheet } from "./spawn-sheet";
-import { GroupLabel, Chip, PulseDot, SourceTag, agentColor, agentLabel, monoFont, sourceGlyph } from "./ui";
+import { GroupLabel, Chip, LinkRow, PulseDot, SourceTag, agentColor, agentLabel, monoFont, sourceGlyph } from "./ui";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 
 /**
@@ -566,7 +566,7 @@ function ChainSection({ theme, chain }: { theme: PluginTheme; chain: ChainInfo }
       {chain.issues.map((issue) => {
         const isNext = next?.key === issue.key;
         return (
-          <ExternalLink key={issue.key} href={issue.url} accessibilityLabel={`Open ${issue.key} in Linear`}>
+          <LinkRow key={issue.key} href={issue.url} accessibilityLabel={`Open ${issue.key} in Linear`}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}>
               <View
                 style={{
@@ -597,7 +597,7 @@ function ChainSection({ theme, chain }: { theme: PluginTheme; chain: ChainInfo }
                 {issue.done ? "Done" : isNext ? (issue.route === "rote" ? "Resumable" : "Yours") : issue.status}
               </Text>
             </View>
-          </ExternalLink>
+          </LinkRow>
         );
       })}
     </View>
