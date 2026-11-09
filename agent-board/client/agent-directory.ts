@@ -205,10 +205,17 @@ export function useAgentDirectory(): {
  * names a card. Refetches whenever an agent shows up in a workspace this map
  * hasn't seen, which covers new workspaces without a second live feed.
  */
-export function useWorkspaceTitles(agents: ReadonlyMap<string, AgentEntry>): ReadonlyMap<string, string> {
+export function useWorkspaceTitles(
+  agents: ReadonlyMap<string, AgentEntry>,
+  /** Workspaces to resolve beyond the live agents', e.g. an archived run's. */
+  extraIds: readonly string[] = [],
+): ReadonlyMap<string, string> {
   const paseo = usePaseo();
   const [titles, setTitles] = useState<ReadonlyMap<string, string>>(new Map());
-  const unseen = [...agents.values()].some((agent) => agent.workspaceId && !titles.has(agent.workspaceId));
+  const wanted = [...[...agents.values()].map((agent) => agent.workspaceId), ...extraIds].filter(
+    (id): id is string => Boolean(id),
+  );
+  const unseen = wanted.some((id) => !titles.has(id));
   useEffect(() => {
     if (!unseen) return;
     let cancelled = false;
@@ -218,17 +225,15 @@ export function useWorkspaceTitles(agents: ReadonlyMap<string, AgentEntry>): Rea
         if (cancelled) return;
         const next = new Map<string, string>();
         for (const workspace of entries) next.set(workspace.id, workspace.title ?? workspace.name);
-        // Agents whose workspace is gone would refetch forever; pin them to "".
-        for (const agent of agents.values()) {
-          if (agent.workspaceId && !next.has(agent.workspaceId)) next.set(agent.workspaceId, "");
-        }
+        // A workspace that's gone would refetch forever; pin it to "".
+        for (const id of wanted) if (!next.has(id)) next.set(id, "");
         setTitles(next);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-    // agents is read at resolve time; unseen is the trigger
+    // wanted is read at resolve time; unseen is the trigger
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paseo, unseen]);
   return titles;

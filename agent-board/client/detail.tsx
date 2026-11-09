@@ -9,7 +9,7 @@ import { nextUp, type ChainInfo } from "../shared/gates";
 import { newCardId, type BoardCard } from "../shared/settings";
 import { githubGetRpc } from "../shared/contracts";
 import { useRpc } from "@getpaseo/plugin/client";
-import { useAgentDirectory, useTicker, type AgentEntry } from "./agent-directory";
+import { useAgentDirectory, useTicker, useWorkspaceTitles, type AgentEntry } from "./agent-directory";
 import { useBoardDoc } from "./board-doc";
 import { useGates } from "./gates";
 import { SpawnSheet } from "./spawn-sheet";
@@ -72,6 +72,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
     const run = card.runs[card.runs.length - 1];
     return run ? (agents.get(run.agentId) ?? null) : null;
   }, [card, agents]);
+  const workspaceTitles = useWorkspaceTitles(agents, card?.runs.map((run) => run.workspaceId));
 
   // The chain this Linear card's project forms (amendment decision 1:
   // context, not content — the chain renders here, never on the board).
@@ -395,6 +396,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
                 theme={theme}
                 run={card.runs[card.runs.length - 1]}
                 agent={agents.get(card.runs[card.runs.length - 1].agentId) ?? null}
+                workspaceTitle={workspaceTitles.get(card.runs[card.runs.length - 1].workspaceId) ?? null}
                 now={now}
                 latest={card.runs.length > 1}
                 onOpen={(agentId) => navigation?.openAgent({ agentId })}
@@ -411,6 +413,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
                             theme={theme}
                             run={run}
                             agent={agents.get(run.agentId) ?? null}
+                            workspaceTitle={workspaceTitles.get(run.workspaceId) ?? null}
                             now={now}
                             onOpen={(agentId) => navigation?.openAgent({ agentId })}
                           />
@@ -660,6 +663,7 @@ function RunRow({
   theme,
   run,
   agent,
+  workspaceTitle,
   now,
   latest,
   onOpen,
@@ -667,6 +671,7 @@ function RunRow({
   theme: PluginTheme;
   run: BoardCard["runs"][number];
   agent: AgentEntry | null;
+  workspaceTitle: string | null;
   now: number;
   latest?: boolean;
   onOpen(agentId: string): void;
@@ -682,7 +687,7 @@ function RunRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open agent ${name}, ${label}, ${when}`}
+      accessibilityLabel={`Open agent ${name}${workspaceTitle ? ` in ${workspaceTitle}` : ""}, ${label}, ${when}`}
       onPress={() => onOpen(run.agentId)}
       style={({ pressed }) => ({
         flexDirection: "row",
@@ -699,6 +704,16 @@ function RunRow({
         >
           {name}
         </Text>
+        {/* Agents are often titled by their first prompt; the workspace is
+            usually the human-named thing. Skipped when it adds nothing. */}
+        {workspaceTitle && workspaceTitle !== name ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+            <Icon name="Folder" size={11} color={theme.colors.foregroundMuted} />
+            <Text style={{ flex: 1, minWidth: 0, color: theme.colors.foregroundMuted, fontSize: 12 }} numberOfLines={1}>
+              {workspaceTitle}
+            </Text>
+          </View>
+        ) : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           {agent ? <Text style={{ color, fontSize: 11, fontWeight: "600" }}>{label}</Text> : null}
           <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{when}</Text>
