@@ -1,0 +1,8 @@
+{
+  "id": "macos-classic-theme",
+  "name": "macOS Classic",
+  "description": "macOS Classic light and dark themes for Paseo, ported from the Zed theme by huacnlee.",
+  "requirements": {
+    "paseo": ">=0.15.0"
+  }
+}
