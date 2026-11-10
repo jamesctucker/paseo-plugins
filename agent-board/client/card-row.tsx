@@ -3,6 +3,7 @@ import { Animated, Pressable, Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { BoardCard } from "../shared/settings";
+import type { PrSignal } from "../shared/pr-signal";
 import { formatElapsed } from "../shared/day";
 import { Chip, PulseDot, SourceTag, agentLabel, monoFont, sourceGlyph, statusColor, useReduceMotion } from "./ui";
 import type { AgentEntry } from "./agent-directory";
@@ -36,6 +37,8 @@ export interface CardRowProps {
   suggestion?: string | null;
   onLinkSuggestion?(): Promise<void>;
   onDeclineSuggestion?(): void;
+  /** Host-supplied CI/review posture, when the card's run workspace has the PR. */
+  prSignal?: PrSignal | null;
 }
 
 export function CardRow({
@@ -53,6 +56,7 @@ export function CardRow({
   suggestion,
   onLinkSuggestion,
   onDeclineSuggestion,
+  prSignal,
 }: CardRowProps) {
   const [hovered, setHovered] = useState(false);
   const [linking, setLinking] = useState(false);
@@ -160,6 +164,19 @@ export function CardRow({
             // Long tracker statuses ("Developer Review") are the meta line's
             // most expendable element, so they ellipsize before anything else.
             <Chip theme={theme} text={card.jiraStatus} color={theme.colors.foregroundMuted} style={{ flexShrink: 1 }} />
+          ) : null}
+          {/* Host CI/review posture: problems named, success quiet. */}
+          {prSignal?.checksStatus === "failure" ? (
+            <Chip
+              theme={theme}
+              text={prSignal.failedChecks > 0 ? `CI ✗${prSignal.failedChecks}` : "CI ✗"}
+              color={theme.colors.statusDanger}
+            />
+          ) : null}
+          {prSignal?.checksStatus === "success" ? <Chip theme={theme} text="CI ✓" color={theme.colors.statusSuccess} /> : null}
+          {prSignal?.checksStatus === "pending" ? <Chip theme={theme} text="CI …" color={theme.colors.foregroundMuted} /> : null}
+          {prSignal?.reviewDecision === "changes_requested" ? (
+            <Chip theme={theme} text="Changes" color={theme.colors.statusWarning} />
           ) : null}
           {chip}
           <Icon name="ChevronRight" size={14} color={theme.colors.foregroundMuted} />

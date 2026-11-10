@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Pressable, ScrollView, Text, View, useWindowDimensions, type TextInput } from "react-native";
+import {
+  Animated,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+  type NativeSyntheticEvent,
+  type TextInputKeyPressEventData,
+} from "react-native";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { usePaseo, useRpc } from "@getpaseo/plugin/client";
@@ -9,6 +19,10 @@ import { newCardId, type BoardCard } from "../shared/settings";
 import { clearedToday, doneThisWeek, doneTodayCount, localDay, staleCards } from "../shared/day";
 import { parseQuickAdd } from "../shared/tracker";
 import { buildGroups, insertAtGroupEnd, isDuplicate, placeCard, showHeader, type CardGroup } from "../shared/groups";
+import { recordArchive } from "../shared/undo";
+import { ArchiveUndoBar, pushArchiveUndo, useArchiveUndo } from "./undo";
+import { prSignalForCard } from "../shared/pr-signal";
+import { useWorkspaceRuntimes } from "./workspace-runtime";
 import { useAgentDirectory, useTicker, useWorkspaceTitles, type AgentEntry } from "./agent-directory";
 import { useBoardDoc } from "./board-doc";
 import { agentMatchText, linkSuggestions } from "../shared/links";
@@ -48,7 +62,9 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   const paseo = usePaseo();
   const toast = useToast();
   const { agents, offline } = useAgentDirectory();
+  const workspaceRuntimes = useWorkspaceRuntimes();
   const gatesApi = useGates(board);
+  const { undo: archiveUndo, runUndo } = useArchiveUndo(board);
   const now = useTicker();
   const { width } = useWindowDimensions();
   // The host's compact flag only covers phones; a narrow desktop window hits
@@ -360,10 +376,39 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     void saveOrExplain(next);
   }
 
+  // Keyboard reorder (Workboard borrow): while a move is armed, arrows walk
+  // the card one row at a time and Escape cancels. The reorder stays armed so
+  // repeated presses keep moving; a tap or Escape ends it. Desktop only —
+  // the capture input is not mounted where it would pop a soft keyboard.
+  function onReorderKey(event: NativeSyntheticEvent<TextInputKeyPressEventData>) {
+    const key = event.nativeEvent.key;
+    if (key === "Escape") {
+      setReorderId(null);
+      return;
+    }
+    if (!reorderId || (key !== "ArrowUp" && key !== "ArrowDown")) return;
+    const index = visibleCards.findIndex((card) => card.id === reorderId);
+    if (index < 0) {
+      setReorderId(null);
+      return;
+    }
+    const target = Math.max(0, Math.min(visibleCards.length - 1, index + (key === "ArrowUp" ? -1 : 1)));
+    if (target === index) return;
+    void saveOrExplain(placeCard(cards, visibleCards, reorderId, target));
+  }
+
   function archiveGroup(group: CardGroup) {
     const ids = new Set(group.cards.map((card) => card.id));
-    const stamp = new Date().toISOString();
-    void saveOrExplain(cards.map((card) => (ids.has(card.id) ? { ...card, archivedAt: stamp } : card)));
+    const { next, undo } = recordArchive(cards, ids, new Date().toISOString());
+    void saveOrExplain(next).then((saved) => {
+      if (saved && undo) pushArchiveUndo(undo);
+    });
+  }
+
+  /** CI/review chips ride the latest run's workspace; unlinked cards stay PAT-only. */
+  function hostPrSignal(card: BoardCard) {
+    const workspaceId = card.runs[card.runs.length - 1]?.workspaceId;
+    return prSignalForCard(card, workspaceId ? workspaceRuntimes.get(workspaceId)?.pullRequest : null);
   }
 
   const weekday = new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
@@ -422,10 +467,21 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   const notices = (
     <>
       {needMigration ? <MigrationBanner theme={theme} count={stale.length} onAnswer={board.answerMigration} /> : null}
+      {archiveUndo ? <ArchiveUndoBar theme={theme} undo={archiveUndo} onUndo={runUndo} /> : null}
       {reorderId ? (
         <Text style={{ color: theme.colors.accent, fontSize: 11, paddingHorizontal: 14, paddingVertical: 4 }}>
-          Moving, tap a position to place the card.
+          {stacked ? "Moving, tap a position to place the card." : "Moving: tap a position, or arrow keys — Esc cancels."}
         </Text>
+      ) : null}
+      {reorderId && !stacked ? (
+        <TextInput
+          autoFocus
+          value=""
+          onChangeText={() => {}}
+          onKeyPress={onReorderKey}
+          accessibilityLabel="Arrow keys move the card, Escape cancels"
+          style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+        />
       ) : null}
     </>
   );
@@ -455,6 +511,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
                 card={card}
                 agent={latestAgent(card, agents)}
                 runStartedAt={latestStart(card)}
+                prSignal={hostPrSignal(card)}
                 now={now}
                 active={reorderId === card.id}
                 compact={layout.compact}

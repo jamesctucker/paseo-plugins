@@ -18,7 +18,7 @@ Running a card opens a short form: workspace, prompt, model, and thinking level,
 
 A Linear card's detail screen shows its chain: every issue in its Linear project with state, in delegation order, so the resume point is one tap away.
 
-Each morning the board offers to carry over unfinished cards from yesterday, the same migration ritual a paper journal uses. Archived cards appear under a quiet Done this week divider and age out after seven days. The Today header counts what you finished today, and an emptied list reads as a cleared day rather than a blank morning.
+Each morning the board offers to carry over unfinished cards from yesterday, the same migration ritual a paper journal uses. Archived cards appear under a quiet Done this week divider and age out after seven days. Every archive offers an undo bar for a few seconds after it lands, since a toast cannot carry the action. The Today header counts what you finished today, and an emptied list reads as a cleared day rather than a blank morning.
 
 ## Setup
 
@@ -36,8 +36,9 @@ Requires Paseo 0.15.0 or later on the daemon. Works on desktop and mobile client
 ## Capabilities and limits
 
 - Quick-add accepts a Jira or Linear key (`PROJ-142`, `ENG-5`), a GitHub pull reference (`owner/repo#123` or a pull URL), or plain text as a prompt card. Append a colon and a task name (`PROJ-142: fix the retry logic`) to add a named task under the issue. Bare keys try Jira first, then Linear; pull references resolve to the real PR title when the GitHub channel is configured. Prefix with `!` to write a manual "Waiting on you" reminder instead of a card.
-- Gates read fresh tracker state when the board opens, when a card archives, and on refresh. They need the matching channel configured; an unconfigured or unreachable channel simply contributes no gates.
+- Gates read fresh tracker state when the board opens, when a card archives, on refresh, and when the app foregrounds or the host reconnects. They need the matching channel configured; an unconfigured or unreachable channel simply contributes no gates.
+- A GitHub PR card whose latest run's workspace has the open PR shows the host-polled CI state and review posture on the row and in detail, without spending the GitHub token; cards with no linked workspace keep the token-based fetch.
 - Chain gates and the chain section come from Linear projects: the project is the chain and blocked-by relations give the order. Jira has no equivalent yet.
 - The composer attachment sources `Attach a Jira issue`, `Attach a GitHub PR`, and `Attach a Linear issue` resolve through the same search adapters, so a snapshot can ride any prompt.
-- Reordering is long-press then tap a position (a grip handle appears on hover on desktop).
+- Reordering is long-press then tap a position (a grip handle appears on hover on desktop); while a move is armed, desktop arrow keys walk the card and Escape cancels.
 - The board reads and writes its own document and reads the trackers through the configured tokens. It never mutates a tracker and does not sync board state between daemons.

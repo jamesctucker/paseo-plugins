@@ -31,6 +31,12 @@ right. Complements a paper bullet journal; it never replaces the tracker or the 
   Linear). Each opens its sheet — assigned Jira issues, open PRs assigned to, created by, or
   awaiting review from you, or your assigned Linear issues. Items already on the board show as
   added instead of duplicating. On phone the channels are buttons in the Today header.
+- **Undo window**: archiving a card or closing out an issue shows an undo bar for about
+  eight seconds — the action a toast can't carry.
+- **Host CI and review posture**: a GitHub PR card whose latest run's workspace has the open
+  PR shows the host-polled CI state (✓ / ✗ / …) and a Changes chip on the row, plus CI and
+  review badges in detail — no token spend. Cards without a linked workspace keep the
+  token-based fetch. Gates revalidate when the app foregrounds or the host reconnects.
 - **Zero write-back**: tracker status is a read-only badge. The board never mutates a tracker.
 - **Attachment sources**: `Attach a Jira issue`, `Attach a GitHub PR`, and `Attach a Linear issue`
   in the composer resolve through the same search adapters the board uses.

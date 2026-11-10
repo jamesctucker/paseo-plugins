@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { useRpc } from "@getpaseo/plugin/client";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AppState } from "react-native";
+import { useHosts, useRpc } from "@getpaseo/plugin/client";
 import {
   githubReviewGatesRpc,
   jiraStatusesRpc,
@@ -86,6 +87,25 @@ export function useGates(board: BoardDoc): Gates {
       listeners.delete(listener);
     };
   }, []);
+
+  // Event-driven revalidation (Workboard borrow): the 2-minute TTL alone lets
+  // a gate you cleared elsewhere keep nagging after you come back. Foregrounding
+  // the app and the host returning online both force a fresh read; the TTL
+  // still covers ordinary staleness between those checkpoints.
+  useEffect(() => {
+    const subscription = AppState?.addEventListener?.("change", (state) => {
+      if (state === "active") invalidate();
+    });
+    return () => subscription?.remove?.();
+  }, []);
+
+  const hostOnline = useHosts().some((host) => host.status === "online");
+  const wasOnline = useRef(hostOnline);
+  useEffect(() => {
+    const reconnected = hostOnline && !wasOnline.current;
+    wasOnline.current = hostOnline;
+    if (reconnected) invalidate();
+  }, [hostOnline]);
 
   const cards = board.values.cards;
   const trackerKeys = useMemo(() => gateTrackerKeys(cards), [cards]);

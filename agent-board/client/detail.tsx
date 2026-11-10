@@ -6,6 +6,10 @@ import { ExternalLink, Markdown } from "@getpaseo/plugin/client/ui";
 import { formatElapsed, formatRelative, localDay } from "../shared/day";
 import { cardKey, insertAtGroupEnd, isDuplicate, siblingTaskCard, taskDisplayTitle } from "../shared/groups";
 import { nextUp, type ChainInfo } from "../shared/gates";
+import { recordArchive, type ArchiveUndo } from "../shared/undo";
+import { ArchiveUndoBar, pushArchiveUndo, useArchiveUndo } from "./undo";
+import { prSignalForCard } from "../shared/pr-signal";
+import { useWorkspaceRuntimes } from "./workspace-runtime";
 import { newCardId, type BoardCard } from "../shared/settings";
 import { githubGetRpc } from "../shared/contracts";
 import { useRpc } from "@getpaseo/plugin/client";
@@ -36,6 +40,8 @@ export interface CardDetailScreenProps extends PluginScreenProps {
 export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpenBoard }: CardDetailScreenProps) {
   const board = useBoardDoc();
   const gatesApi = useGates(board);
+  const { undo: archiveUndo, runUndo } = useArchiveUndo(board);
+  const workspaceRuntimes = useWorkspaceRuntimes();
   const getPr = useRpc(githubGetRpc);
   const { agents } = useAgentDirectory();
   const now = useTicker();
@@ -78,11 +84,24 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
   // context, not content — the chain renders here, never on the board).
   const chain = card?.source === "linear" && card.jiraKey ? gatesApi.chainForKey(card.jiraKey) : null;
 
-  // The PR's review posture for the badge next to Open in GitHub; a failed
-  // fetch degrades to no badge, matching the enrichment pattern elsewhere.
+  // Host CI/review signal from the latest run's workspace, when that
+  // workspace's branch PR is this card's PR.
+  const hostSignal = card
+    ? prSignalForCard(
+        card,
+        card.runs.length > 0
+          ? workspaceRuntimes.get(card.runs[card.runs.length - 1].workspaceId)?.pullRequest
+          : null,
+      )
+    : null;
+
+  // The PR's review posture for the badge next to Open in GitHub: the host's
+  // own polling answers first, and the PAT fetch covers cards with no linked
+  // workspace. A failed fetch degrades to no badge, matching the enrichment
+  // pattern elsewhere.
   useEffect(() => {
-    setReviewDecision(null);
-    if (!card?.github) return;
+    setReviewDecision(hostSignal?.reviewDecision ?? null);
+    if (!card?.github || hostSignal?.reviewDecision) return;
     const { repo, number } = card.github;
     let cancelled = false;
     getPr({ key: `${repo}#${number}` })
@@ -95,7 +114,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
     };
     // getPr identity is stable per installation
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card?.id]);
+  }, [card?.id, hostSignal?.reviewDecision]);
 
   // Siblings are the other live tasks under the same tracker key.
   const siblings = useMemo(() => {
@@ -146,7 +165,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
    * state celebrates on its own, but archiving from here keeps you on this
    * screen, so the last card of the day would otherwise land in silence.
    */
-  function saveArchive(next: typeof cards) {
+  function saveArchive(next: typeof cards, undo?: ArchiveUndo | null) {
     const today = localDay(new Date());
     const clearsDay = !next.some((entry) => !entry.archivedAt && entry.day >= today);
     void board.saveCards(next).then((reason) => {
@@ -154,6 +173,9 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
         toast.show(`Couldn't save — ${reason}`, { variant: "error" });
         return;
       }
+      // The undo offer rides the confirmed save — offering a reversal for an
+      // archive that never landed would un-archive whatever wins the conflict.
+      if (undo) pushArchiveUndo(undo);
       if (clearsDay) toast.show("That was the last one. Day's clear.", { variant: "success" });
     });
   }
@@ -163,8 +185,9 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
     // the early-return narrowing.
     const key = card ? cardKey(card) : null;
     if (!key) return;
-    const stamp = new Date().toISOString();
-    saveArchive(cards.map((entry) => (!entry.archivedAt && cardKey(entry) === key ? { ...entry, archivedAt: stamp } : entry)));
+    const ids = new Set(cards.filter((entry) => cardKey(entry) === key).map((entry) => entry.id));
+    const { next, undo } = recordArchive(cards, ids, new Date().toISOString());
+    saveArchive(next, undo);
   }
 
   const runStartedAt = card.runs.length > 0 ? Date.parse(card.runs[card.runs.length - 1].startedAt) : null;
@@ -190,6 +213,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
           alignSelf: "center",
         }}
       >
+        {archiveUndo ? <ArchiveUndoBar theme={theme} undo={archiveUndo} onUndo={runUndo} /> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <Icon name={sourceGlyph(card.source)} size={14} color={theme.colors.foregroundMuted} />
           <SourceTag theme={theme} source={card.source} />
@@ -244,6 +268,25 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
             >
               <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Open in GitHub</Text>
             </ExternalLink>
+          ) : null}
+          {hostSignal?.checksStatus ? (
+            <Chip
+              theme={theme}
+              text={
+                hostSignal.checksStatus === "success"
+                  ? "CI passing"
+                  : hostSignal.checksStatus === "failure"
+                    ? `CI failing${hostSignal.failedChecks > 0 ? ` (${hostSignal.failedChecks})` : ""}`
+                    : "CI pending"
+              }
+              color={
+                hostSignal.checksStatus === "success"
+                  ? theme.colors.statusSuccess
+                  : hostSignal.checksStatus === "failure"
+                    ? theme.colors.statusDanger
+                    : theme.colors.foregroundMuted
+              }
+            />
           ) : null}
           {reviewDecision ? (
             <Chip
@@ -503,13 +546,12 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
                 return;
               }
               disarmArchive();
-              const next = cards.map((entry) =>
-                entry.id === card.id
-                  ? { ...entry, archivedAt: card.archivedAt ? null : new Date().toISOString() }
-                  : entry,
-              );
-              if (card.archivedAt) save(next);
-              else saveArchive(next);
+              if (card.archivedAt) {
+                save(cards.map((entry) => (entry.id === card.id ? { ...entry, archivedAt: null } : entry)));
+              } else {
+                const { next, undo } = recordArchive(cards, new Set([card.id]), new Date().toISOString());
+                saveArchive(next, undo);
+              }
             }}
             style={{
               backgroundColor: theme.colors.surface1,
