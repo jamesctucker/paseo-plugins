@@ -10,6 +10,9 @@ export const pullRequestSchema = z.object({
   isDraft: z.boolean(),
   reviewRequested: z.boolean(),
   assigned: z.boolean(),
+  // Local clone of the PR's repo on the daemon host, when one exists; the client
+  // needs it as the worktree source for "create review workspace".
+  localCheckoutPath: z.string().nullable(),
   updatedAt: z.string(),
 });
 

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 import { z } from "zod";
 
@@ -41,6 +42,19 @@ async function search(scopeFlag: string): Promise<GhSearchItem[]> {
   return z.array(ghSearchItem).parse(JSON.parse(stdout));
 }
 
+// The daemon runs on the machine that holds the-garage; PR repos are expected as
+// sibling checkouts under work/ (see the workspace directory map).
+const GARAGE_ROOT = "/Users/james/the-garage";
+
+function localCheckoutFor(repo: string): string | null {
+  const name = repo.split("/")[1] ?? "";
+  const candidates = [
+    ...(name === "the-garage" ? [GARAGE_ROOT] : []),
+    `${GARAGE_ROOT}/work/${name}`,
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
 export async function listRequestedReviews() {
   let requested: GhSearchItem[];
   let assigned: GhSearchItem[];
@@ -70,6 +84,7 @@ export async function listRequestedReviews() {
     isDraft: item.isDraft ?? false,
     reviewRequested: requestedUrls.has(item.url),
     assigned: assignedUrls.has(item.url),
+    localCheckoutPath: localCheckoutFor(item.repository.nameWithOwner),
     updatedAt: item.updatedAt,
   }));
   // Review requests first, then most recently updated.
