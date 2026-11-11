@@ -23,6 +23,7 @@ import { recordArchive } from "../shared/undo";
 import { ArchiveUndoBar, pushArchiveUndo, useArchiveUndo } from "./undo";
 import { prSignalForCard } from "../shared/pr-signal";
 import { useWorkspaceRuntimes } from "./workspace-runtime";
+import { noteKey } from "../shared/notes";
 import { useAgentDirectory, useTicker, useWorkspaceTitles, type AgentEntry } from "./agent-directory";
 import { useBoardDoc } from "./board-doc";
 import { agentMatchText, linkSuggestions } from "../shared/links";
@@ -135,6 +136,8 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
 
   const today = localDay(new Date());
   const cards = board.values.cards;
+  /** Issue keys carrying a note, for the row marker. */
+  const noteKeys = useMemo(() => new Set(Object.keys(board.values.cardNotes)), [board.values.cardNotes]);
 
   /**
    * Keys already on the board, so a channel sheet can show them as inert
@@ -512,6 +515,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
                 agent={latestAgent(card, agents)}
                 runStartedAt={latestStart(card)}
                 prSignal={hostPrSignal(card)}
+                hasNote={noteKeys.has(noteKey(card))}
                 now={now}
                 active={reorderId === card.id}
                 compact={layout.compact}

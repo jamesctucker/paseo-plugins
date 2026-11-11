@@ -52,11 +52,17 @@ export const BoardCardSchema = z.object({
 export const boardDoc = defineSettings({
   id: "board",
   scope: "host",
-  version: 6,
+  version: 7,
   schema: z.object({
     cards: z.array(BoardCardSchema).default([]),
     /** Day the migration prompt was last answered, so it asks once per day. */
     migrationAnsweredDay: z.string().default(""),
+    /**
+     * Issue-keyed memos (see shared/notes.ts): the note belongs to the issue
+     * or PR, not the ephemeral card, so it returns when the issue returns.
+     * Prompt cards key on their card id and die with the card.
+     */
+    cardNotes: z.record(z.string(), z.object({ text: z.string(), updatedAt: z.string() })).default({}),
     /**
      * Board-local review dismissals: agentId → the agent's updatedAt stamp
      * when dismissed. The SDK exposes no silent clear-attention, so the board
@@ -77,11 +83,11 @@ export const boardDoc = defineSettings({
   }),
   // v2 added dismissedAttention, v3 added the linear card source, v4 added
   // issueTitle, v5 added gates storage + the card route, v6 added
-  // declinedLinks. Additive fields ride
+  // declinedLinks, v7 added cardNotes. Additive fields ride
   // schema defaults; the only backfill is v4's issueTitle, since every pre-v4
   // tracker card was a whole-issue task whose title is the issue's.
   migrate: (values, fromVersion) => {
-    if (fromVersion >= 5) return values;
+    if (fromVersion >= 6) return values;
     if (fromVersion >= 4) return { ...((values ?? {}) as Record<string, unknown>), manualGates: {}, clearedDoneNags: {} };
     const stored = (values ?? {}) as { cards?: (Record<string, unknown> & { title?: string; issueTitle?: string; jiraKey?: string; github?: unknown })[] };
     return {

@@ -33,6 +33,10 @@ right. Complements a paper bullet journal; it never replaces the tracker or the 
   added instead of duplicating. On phone the channels are buttons in the Today header.
 - **Undo window**: archiving a card or closing out an issue shows an undo bar for about
   eight seconds — the action a toast can't carry.
+- **Issue notes**: each issue (or PR) carries a memo that survives archiving — archive the
+  card, re-add the issue next week, the note is back. Sibling task cards share the issue's
+  note; prompt cards keep their own. Edit it on the card's detail screen; a page icon marks
+  noted cards on the board.
 - **Host CI and review posture**: a GitHub PR card whose latest run's workspace has the open
   PR shows the host-polled CI state (✓ / ✗ / …) and a Changes chip on the row, plus CI and
   review badges in detail — no token spend. Cards without a linked workspace keep the

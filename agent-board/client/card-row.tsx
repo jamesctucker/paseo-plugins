@@ -39,6 +39,8 @@ export interface CardRowProps {
   onDeclineSuggestion?(): void;
   /** Host-supplied CI/review posture, when the card's run workspace has the PR. */
   prSignal?: PrSignal | null;
+  /** The card's issue carries a note (see shared/notes.ts). */
+  hasNote?: boolean;
 }
 
 export function CardRow({
@@ -57,6 +59,7 @@ export function CardRow({
   onLinkSuggestion,
   onDeclineSuggestion,
   prSignal,
+  hasNote,
 }: CardRowProps) {
   const [hovered, setHovered] = useState(false);
   const [linking, setLinking] = useState(false);
@@ -131,7 +134,7 @@ export function CardRow({
     >
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={card.title}
+        accessibilityLabel={hasNote ? `${card.title}, has note` : card.title}
         onPress={onPress}
         onLongPress={onLongPress}
         onHoverIn={() => setHovered(true)}
@@ -159,6 +162,7 @@ export function CardRow({
               {keyText}
             </Text>
           ) : null}
+          {hasNote ? <Icon name="FileText" size={12} color={theme.colors.foregroundMuted} /> : null}
           <View style={styles.spacer} />
           {!grouped && card.jiraStatus ? (
             // Long tracker statuses ("Developer Review") are the meta line's

@@ -32,6 +32,8 @@ export interface BoardDoc {
   dismissAttention(agentId: string, stamp: string): Promise<boolean>;
   addManualGate(text: string): Promise<string | null>;
   removeManualGate(id: string): Promise<string | null>;
+  /** Write an issue-keyed note; empty text removes it. */
+  saveNote(key: string, text: string): Promise<string | null>;
   clearDoneNag(key: string): Promise<string | null>;
   /** Attach an agent the board didn't start as the card's latest run. */
   linkAgent(cardId: string, agent: AgentEntry): Promise<string | null>;
@@ -45,6 +47,7 @@ export function useBoardDoc(): BoardDoc {
   const lastGood = useRef<BoardValues>({
     cards: [],
     migrationAnsweredDay: "",
+    cardNotes: {},
     dismissedAttention: {},
     manualGates: {},
     clearedDoneNags: {},
@@ -140,6 +143,18 @@ export function useBoardDoc(): BoardDoc {
     [values, saveValues],
   );
 
+  const saveNote = useCallback(
+    async (key: string, text: string) => {
+      const cardNotes = { ...values.cardNotes };
+      const trimmed = text.trim();
+      if (trimmed) cardNotes[key] = { text: trimmed, updatedAt: new Date().toISOString() };
+      else delete cardNotes[key];
+      return saveValues({ ...values, cardNotes });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [values, saveValues],
+  );
+
   const linkAgent = useCallback(
     async (cardId: string, agent: AgentEntry) => {
       // The live directory usually carries the workspace; an older daemon's
@@ -186,6 +201,7 @@ export function useBoardDoc(): BoardDoc {
     dismissAttention,
     addManualGate,
     removeManualGate,
+    saveNote,
     clearDoneNag,
     linkAgent,
     declineLink,

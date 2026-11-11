@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
@@ -6,7 +6,8 @@ import { ExternalLink, Markdown } from "@getpaseo/plugin/client/ui";
 import { formatElapsed, formatRelative, localDay } from "../shared/day";
 import { cardKey, insertAtGroupEnd, isDuplicate, siblingTaskCard, taskDisplayTitle } from "../shared/groups";
 import { nextUp, type ChainInfo } from "../shared/gates";
-import { recordArchive, type ArchiveUndo } from "../shared/undo";
+import { noteKey } from "../shared/notes";
+import { recordArchive, UNDO_WINDOW_MS, type ArchiveUndo } from "../shared/undo";
 import { ArchiveUndoBar, pushArchiveUndo, useArchiveUndo } from "./undo";
 import { prSignalForCard } from "../shared/pr-signal";
 import { useWorkspaceRuntimes } from "./workspace-runtime";
@@ -73,6 +74,89 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
   const cards = board.values.cards;
   const index = cards.findIndex((card) => card.id === params.cardId);
   const card = index >= 0 ? cards[index] : null;
+
+  // Issue-keyed note, autosaved: the memo outlives working memory, so no
+  // save button may let the draft die there. One flush behind a ref — every
+  // exit (debounce, card switch, unmount, failure retry) shares its dedupe,
+  // delete-undo capture, and error handling, and the ref is reseated every
+  // render so no exit ever saves through a stale revision.
+  const thisNoteKey = card ? noteKey(card) : "";
+  const savedNote = thisNoteKey ? board.values.cardNotes[thisNoteKey] : undefined;
+  const [noteDraft, setNoteDraft] = useState(savedNote?.text ?? "");
+  const noteDirty = noteDraft.trim() !== (savedNote?.text ?? "");
+  const [noteSaveError, setNoteSaveError] = useState<{ key: string; reason: string } | null>(null);
+  const [noteDeleteUndo, setNoteDeleteUndo] = useState<{ key: string; text: string; expiresAt: number } | null>(null);
+  const noteLive = useRef({ key: thisNoteKey, text: noteDraft });
+  noteLive.current = { key: thisNoteKey, text: noteDraft };
+  const lastNoteToast = useRef<string | null>(null);
+  const flushNote = useRef((key: string, text: string) => {});
+  flushNote.current = (key: string, text: string) => {
+    if (!key) return;
+    const trimmed = text.trim();
+    const priorText = board.values.cardNotes[key]?.text;
+    // The doc already holds it (a debounce beat a switch-flush to the same
+    // text) — saving would manufacture a false conflict toast.
+    if ((priorText ?? "") === trimmed) return;
+    void board.saveNote(key, trimmed).then((reason) => {
+      if (reason) {
+        setNoteSaveError({ key, reason });
+        // Offline failure would otherwise toast once per debounce cycle.
+        if (reason !== lastNoteToast.current) {
+          lastNoteToast.current = reason;
+          toast.show(`Couldn't save note — ${reason}`, { variant: "error" });
+        }
+        // One retry, only if the intent hasn't moved on since.
+        setTimeout(() => {
+          if (noteLive.current.key === key && noteLive.current.text.trim() === trimmed) flushNote.current(key, text);
+        }, 3_000);
+        return;
+      }
+      lastNoteToast.current = null;
+      setNoteSaveError((prev) => (prev?.key === key ? null : prev));
+      // Deletion is the screen's only unarmed destructive action — offer the
+      // same timed reversal the archive bar does.
+      if (trimmed === "" && priorText) setNoteDeleteUndo({ key, text: priorText, expiresAt: Date.now() + UNDO_WINDOW_MS });
+    });
+  };
+  // Reseed on card switch, and on our own save landing: an in-flight flush
+  // makes this screen not-quite the only writer, so updatedAt must reseed too
+  // or a fast A→B→A switch can resurrect stale text.
+  useEffect(() => {
+    setNoteDraft(savedNote?.text ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thisNoteKey, savedNote?.updatedAt]);
+  const notePrev = useRef({ key: thisNoteKey, text: noteDraft, dirty: noteDirty });
+  useEffect(() => {
+    const before = notePrev.current;
+    if (before.key !== thisNoteKey) {
+      if (before.key && before.dirty) flushNote.current(before.key, before.text);
+      setNoteSaveError(null);
+      setNoteDeleteUndo(null);
+    }
+    notePrev.current = { key: thisNoteKey, text: noteDraft, dirty: noteDirty };
+  });
+  useEffect(() => {
+    if (!noteDirty || !thisNoteKey) return;
+    const key = thisNoteKey;
+    const text = noteDraft;
+    const timer = setTimeout(() => flushNote.current(key, text), 1_000);
+    return () => clearTimeout(timer);
+  }, [noteDraft, noteDirty, thisNoteKey]);
+  useEffect(
+    () => () => {
+      const { key, text } = noteLive.current;
+      flushNote.current(key, text);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  // The delete-undo offer expires on its own clock, like the archive bar's.
+  useEffect(() => {
+    if (!noteDeleteUndo) return;
+    const remaining = Math.max(0, noteDeleteUndo.expiresAt - Date.now());
+    const timer = setTimeout(() => setNoteDeleteUndo((undo) => (undo && undo.expiresAt <= Date.now() ? null : undo)), remaining + 50);
+    return () => clearTimeout(timer);
+  }, [noteDeleteUndo]);
   const agent = useMemo(() => {
     if (!card) return null;
     const run = card.runs[card.runs.length - 1];
@@ -310,6 +394,71 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
         </View>
 
         {card.body ? <Markdown>{card.body}</Markdown> : null}
+
+        <View style={{ gap: 6 }}>
+          <GroupLabel
+            theme={theme}
+            text={
+              cardKey(card)
+                ? `Note · survives archiving · shared by all ${cardKey(card)} cards`
+                : "Note · this card only · deleted with it"
+            }
+          />
+          <TextInput
+            value={noteDraft}
+            onChangeText={setNoteDraft}
+            multiline
+            placeholder="Memo for later"
+            placeholderTextColor={theme.colors.foregroundMuted}
+            accessibilityLabel="Card note"
+            style={{
+              color: theme.colors.foreground,
+              backgroundColor: theme.colors.surface1,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              borderRadius: 8,
+              paddingHorizontal: 10,
+              paddingVertical: 8,
+              fontSize: 12,
+              minHeight: 60,
+              textAlignVertical: "top",
+            }}
+          />
+          {noteDirty || savedNote || noteSaveError?.key === thisNoteKey || noteDeleteUndo ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }} accessibilityLiveRegion="polite">
+              {noteDeleteUndo ? (
+                <>
+                  <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>Note deleted</Text>
+                  <View style={{ flex: 1 }} />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Undo note deletion"
+                    onPress={() => {
+                      const undo = noteDeleteUndo;
+                      setNoteDeleteUndo(null);
+                      flushNote.current(undo.key, undo.text);
+                    }}
+                    hitSlop={6}
+                  >
+                    <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "600" }}>Undo</Text>
+                  </Pressable>
+                </>
+              ) : noteSaveError?.key === thisNoteKey ? (
+                // The anomalous state must look anomalous: a stuck grey
+                // "Unsaved" is an open loop this user can't put down.
+                <Text style={{ color: theme.colors.statusWarning, fontSize: 11 }}>Couldn't save — retrying</Text>
+              ) : noteDirty ? (
+                <Text style={{ color: theme.colors.statusWarning, fontSize: 11 }}>
+                  {savedNote && noteDraft.trim() === "" ? "Clearing deletes the note" : "Unsaved"}
+                </Text>
+              ) : savedNote ? (
+                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>
+                  Saved {formatRelative(Date.parse(savedNote.updatedAt), now)}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
 
         {cardKey(card) !== null ? (
           <View style={{ gap: 4 }}>
