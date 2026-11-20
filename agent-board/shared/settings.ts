@@ -43,7 +43,11 @@ export const BoardCardSchema = z.object({
       number: z.number().int().positive(),
     })
     .optional(),
-  day: z.string(),
+  /**
+   * The card's day, `YYYY-MM-DD`. Null is the inbox (amendment 2026-11-20):
+   * captured but not yet placed, so it stays out of every dated surface.
+   */
+  day: z.string().nullable(),
   createdAt: z.string(),
   archivedAt: z.string().nullable().default(null),
   runs: z.array(CardRunSchema).default([]),
@@ -52,7 +56,7 @@ export const BoardCardSchema = z.object({
 export const boardDoc = defineSettings({
   id: "board",
   scope: "host",
-  version: 7,
+  version: 8,
   schema: z.object({
     cards: z.array(BoardCardSchema).default([]),
     /** Day the migration prompt was last answered, so it asks once per day. */
@@ -83,9 +87,11 @@ export const boardDoc = defineSettings({
   }),
   // v2 added dismissedAttention, v3 added the linear card source, v4 added
   // issueTitle, v5 added gates storage + the card route, v6 added
-  // declinedLinks, v7 added cardNotes. Additive fields ride
-  // schema defaults; the only backfill is v4's issueTitle, since every pre-v4
-  // tracker card was a whole-issue task whose title is the issue's.
+  // declinedLinks, v7 added cardNotes, v8 made day nullable (the inbox's
+  // undated state — every stored day is a string, so there is no backfill).
+  // Additive fields ride schema defaults; the only backfill is v4's
+  // issueTitle, since every pre-v4 tracker card was a whole-issue task whose
+  // title is the issue's.
   migrate: (values, fromVersion) => {
     if (fromVersion >= 6) return values;
     if (fromVersion >= 4) return { ...((values ?? {}) as Record<string, unknown>), manualGates: {}, clearedDoneNags: {} };

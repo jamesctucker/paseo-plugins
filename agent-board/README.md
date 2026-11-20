@@ -7,6 +7,9 @@ right. Complements a paper bullet journal; it never replaces the tracker or the 
 - **Today list**: transcribed each morning. Quick-add accepts a Jira key (`PROJ-142`), a GitHub
   pull reference (`owner/repo#123`), or plain text as a prompt card. Unfinished cards from
   yesterday get a one-tap carry-over prompt.
+- **Inbox**: quick-add lands in the inbox, a quiet section above Today. Select rows and move
+  them onto Today in one action; channel-sheet picks still go straight to Today. The inbox never
+  nags — no age tint, no count badge, hidden when empty.
 - **Task cards**: every card is a task. One issue can fan out to several agents — add tasks from
   a card's detail screen or with `PROJ-142: fix the retry logic` in quick-add. Tasks sharing an
   issue render under an issue header (key, title, one status badge), reorder as a unit, archive

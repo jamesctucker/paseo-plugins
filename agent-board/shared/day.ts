@@ -13,23 +13,26 @@ export function localDay(date: Date): string {
 export const DONE_WINDOW_DAYS = 7;
 
 export interface DatedCard {
-  day: string;
+  /** Null is the inbox: undated, so it is never stale, carried, or dropped. */
+  day: string | null;
   archivedAt: string | null;
 }
 
-/** Unarchived cards from before today: the set the migration prompt offers. */
+/** Unarchived dated cards from before today: the set the migration prompt offers. Inbox cards are never stale. */
 export function staleCards<T extends DatedCard>(cards: readonly T[], today: string): T[] {
-  return cards.filter((card) => !card.archivedAt && card.day < today);
+  return cards.filter((card) => !card.archivedAt && card.day !== null && card.day < today);
 }
 
-/** Re-date carried cards onto today so they stay in the working set. */
+/** Re-date carried cards onto today so they stay in the working set; the inbox keeps its null. */
 export function carryOver<T extends DatedCard>(cards: readonly T[], today: string): T[] {
-  return cards.map((card) => !card.archivedAt && card.day < today ? { ...card, day: today } : card);
+  return cards.map((card) =>
+    !card.archivedAt && card.day !== null && card.day < today ? { ...card, day: today } : card,
+  );
 }
 
-/** Drop the stale unfinished cards instead of carrying them. */
+/** Drop the stale unfinished cards instead of carrying them; the inbox keeps its null. */
 export function dropStale<T extends DatedCard>(cards: readonly T[], today: string): T[] {
-  return cards.filter((card) => card.archivedAt || card.day >= today);
+  return cards.filter((card) => card.archivedAt || card.day === null || card.day >= today);
 }
 
 /** Archived cards younger than the done window; older ones age to nothing. */
@@ -95,7 +98,7 @@ export function formatRelative(startedAtMs: number, nowMs: number): string {
 export function clearedToday<T extends DatedCard>(cards: readonly T[], today: string): boolean {
   let archivedToday = false;
   for (const card of cards) {
-    if (card.day < today) continue;
+    if (card.day === null || card.day < today) continue;
     if (!card.archivedAt) return false;
     if (card.day === today) archivedToday = true;
   }

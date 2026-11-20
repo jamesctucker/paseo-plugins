@@ -17,6 +17,7 @@ import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { boardCapabilitiesRpc, boardStopRpc, githubGetRpc, issueSearchRpc, linearSearchRpc } from "../shared/contracts";
 import { newCardId, type BoardCard } from "../shared/settings";
 import { clearedToday, doneThisWeek, doneTodayCount, localDay, staleCards } from "../shared/day";
+import { inboxCards, moveInboxToToday } from "../shared/inbox";
 import { parseQuickAdd } from "../shared/tracker";
 import { buildGroups, insertAtGroupEnd, isDuplicate, placeCard, showHeader, type CardGroup } from "../shared/groups";
 import { recordArchive } from "../shared/undo";
@@ -30,6 +31,7 @@ import { agentMatchText, linkSuggestions } from "../shared/links";
 import { useGates } from "./gates";
 import { CardRow } from "./card-row";
 import { ChannelDock, type Channel } from "./dock";
+import { InboxSection } from "./inbox";
 import { Rail, type PermissionResponse } from "./rail";
 import { QuickAdd } from "./quick-add";
 import { JiraSheet } from "./jira-sheet";
@@ -166,12 +168,13 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     else toast.show(`Linked to ${card.jiraKey ?? (card.github ? `#${card.github.number}` : card.title)}`, { variant: "success" });
   }
 
-  const { todayCards, done, stale, doneToday } = useMemo(
+  const { todayCards, done, stale, doneToday, inbox } = useMemo(
     () => ({
-      todayCards: cards.filter((card) => !card.archivedAt && card.day >= today),
+      todayCards: cards.filter((card) => !card.archivedAt && card.day !== null && card.day >= today),
       done: doneThisWeek(cards, new Date()),
       stale: staleCards(cards, today),
       doneToday: doneTodayCount(cards, today),
+      inbox: inboxCards(cards),
     }),
     [cards, today],
   );
@@ -221,11 +224,16 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     return reason === null;
   }
 
-  function taskCardBase(): Pick<BoardCard, "id" | "body" | "day" | "createdAt" | "archivedAt" | "runs"> {
+  /**
+   * New cards carry the day they're destined for: quick-add captures land in
+   * the inbox (null, amendment 2026-11-20) and channel-sheet picks go
+   * straight onto today.
+   */
+  function taskCardBase(day: string | null): Pick<BoardCard, "id" | "body" | "day" | "createdAt" | "archivedAt" | "runs"> {
     return {
       id: newCardId(),
       body: "",
-      day: today,
+      day,
       createdAt: new Date().toISOString(),
       archivedAt: null,
       runs: [],
@@ -235,10 +243,11 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   async function addCardFromIssue(
     issue: { identifier: string; title: string; status: string; url: string; route?: "rote" | "creative" },
     source: "jira" | "linear",
+    day: string | null,
   ) {
     // The sheet's pick is the whole-issue task: its title is the issue's.
     const card: BoardCard = {
-      ...taskCardBase(),
+      ...taskCardBase(day),
       source,
       title: issue.title,
       issueTitle: issue.title,
@@ -251,15 +260,15 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     return addTaskCard(card, issue.identifier);
   }
 
-  /** Quick-add task: the issue is real, the task title is the user's. */
+  /** Quick-add task: the issue is real, the task title is the user's. Lands in the inbox. */
   async function addTaskFromTracker(
     issue: { identifier: string; title: string; status: string; url: string; route?: "rote" | "creative" },
     source: "jira" | "linear",
     task: string | undefined,
   ) {
-    if (!task) return addCardFromIssue(issue, source);
+    if (!task) return addCardFromIssue(issue, source, null);
     const card: BoardCard = {
-      ...taskCardBase(),
+      ...taskCardBase(null),
       source,
       title: task,
       issueTitle: issue.title,
@@ -271,14 +280,14 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     return addTaskCard(card, issue.identifier);
   }
 
-  async function addCardFromPr(pr: { identifier: string; title: string; url: string }) {
+  async function addCardFromPr(pr: { identifier: string; title: string; url: string }, day: string | null) {
     const ref = parseQuickAdd(pr.identifier);
     if (ref.kind !== "github") {
       setError(`Not a pull request reference: ${pr.identifier}`);
       return false;
     }
     const card: BoardCard = {
-      ...taskCardBase(),
+      ...taskCardBase(day),
       source: "github",
       title: pr.title,
       issueTitle: pr.title,
@@ -324,7 +333,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
         // keep the typo guard.
         if (parsed.task && unreachable) {
           const card: BoardCard = {
-            ...taskCardBase(),
+            ...taskCardBase(null),
             source: "jira",
             title: parsed.task,
             jiraKey: parsed.key,
@@ -340,7 +349,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
         try {
           const pr = await getPr({ key: `${parsed.repo}#${parsed.number}` });
           const card: BoardCard = {
-            ...taskCardBase(),
+            ...taskCardBase(null),
             source: "github",
             title: parsed.task ?? pr.title,
             issueTitle: pr.title,
@@ -349,7 +358,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
           return await addTaskCard(card, `${parsed.repo}#${parsed.number}`);
         } catch {
           const card: BoardCard = {
-            ...taskCardBase(),
+            ...taskCardBase(null),
             source: "github",
             title: parsed.task ?? `${parsed.repo}#${parsed.number}`,
             github: { repo: parsed.repo, number: parsed.number },
@@ -357,7 +366,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
           return await addTaskCard(card, `${parsed.repo}#${parsed.number}`);
         }
       }
-      const card: BoardCard = { ...taskCardBase(), source: "prompt", title: parsed.title };
+      const card: BoardCard = { ...taskCardBase(null), source: "prompt", title: parsed.title };
       return await saveOrExplain([...cards, card]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -556,6 +565,15 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
       })()
     );
 
+  const inboxSection =
+    inbox.length > 0 ? (
+      <InboxSection
+        theme={theme}
+        cards={inbox}
+        onMove={(ids) => saveOrExplain(moveInboxToToday(cards, ids, today))}
+      />
+    ) : null;
+
   const doneSection =
     done.length > 0 ? (
       <View style={{ marginTop: 10, paddingHorizontal: 12 }}>
@@ -623,7 +641,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
         open={openChannel === "jira"}
         onOpenChange={(open) => setOpenChannel(open ? "jira" : null)}
         onBoard={onBoardKeys}
-        onPick={(issue) => addCardFromIssue(issue, "jira")}
+        onPick={(issue) => addCardFromIssue(issue, "jira", today)}
         onOpenSettings={onOpenSettings}
       />
       <GitHubSheet
@@ -631,7 +649,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
         open={openChannel === "github"}
         onOpenChange={(open) => setOpenChannel(open ? "github" : null)}
         onBoard={onBoardKeys}
-        onPick={(pr) => addCardFromPr(pr)}
+        onPick={(pr) => addCardFromPr(pr, today)}
         onOpenSettings={onOpenSettings}
       />
       <LinearSheet
@@ -639,7 +657,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
         open={openChannel === "linear"}
         onOpenChange={(open) => setOpenChannel(open ? "linear" : null)}
         onBoard={onBoardKeys}
-        onPick={(issue) => addCardFromIssue(issue, "linear")}
+        onPick={(issue) => addCardFromIssue(issue, "linear", today)}
         onOpenSettings={onOpenSettings}
       />
     </>
@@ -649,6 +667,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     return (
       <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }}>
+          {inboxSection}
           {todayHeader}
           {notices}
           {todayList}
@@ -666,6 +685,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
       {/* minWidth: 0 so a narrow window shrinks this column instead of its
           children overflowing into the rail. */}
       <View style={{ flex: 1, minWidth: 0 }}>
+        {inboxSection}
         {todayHeader}
         {notices}
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 4 }}>

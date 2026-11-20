@@ -9,7 +9,7 @@ describe("localDay", () => {
 });
 
 describe("staleCards", () => {
-  it("flags only unarchived cards from before today", () => {
+  it("flags only unarchived dated cards from before today", () => {
     const cards = [
       { id: "a", day: "2026-11-03", archivedAt: null },
       { id: "b", day: "2026-11-04", archivedAt: null },
@@ -17,6 +17,11 @@ describe("staleCards", () => {
     ];
     const stale = staleCards(cards, "2026-11-04");
     expect(stale.map((card) => card.id)).toEqual(["a"]);
+  });
+
+  it("never treats an inbox card as stale", () => {
+    const cards = [{ id: "parked", day: null, archivedAt: null }];
+    expect(staleCards(cards, "2026-11-04")).toEqual([]);
   });
 });
 
@@ -32,6 +37,11 @@ describe("carryOver", () => {
     expect(next[1].day).toBe("2026-11-04");
     expect(next[2].day).toBe("2026-11-02");
   });
+
+  it("keeps inbox cards undated", () => {
+    const next = carryOver([{ id: "parked", day: null, archivedAt: null }], "2026-11-04");
+    expect(next[0].day).toBeNull();
+  });
 });
 
 describe("dropStale", () => {
@@ -43,6 +53,11 @@ describe("dropStale", () => {
     ];
     const next = dropStale(cards, "2026-11-04");
     expect(next.map((card) => card.id)).toEqual(["b", "c"]);
+  });
+
+  it("keeps inbox cards", () => {
+    const next = dropStale([{ id: "parked", day: null, archivedAt: null }], "2026-11-04");
+    expect(next.map((card) => card.id)).toEqual(["parked"]);
   });
 });
 

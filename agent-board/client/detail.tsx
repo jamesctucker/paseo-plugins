@@ -251,7 +251,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
    */
   function saveArchive(next: typeof cards, undo?: ArchiveUndo | null) {
     const today = localDay(new Date());
-    const clearsDay = !next.some((entry) => !entry.archivedAt && entry.day >= today);
+    const clearsDay = !next.some((entry) => !entry.archivedAt && entry.day !== null && entry.day >= today);
     void board.saveCards(next).then((reason) => {
       if (reason) {
         toast.show(`Couldn't save — ${reason}`, { variant: "error" });
