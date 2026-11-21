@@ -1,15 +1,12 @@
 {
   "name": "macos-classic-theme",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
-    "OVERVIEW.*.md",
-    "index.client.ts",
     "index.client.tsx",
     "index.server.ts",
-    "index.server.tsx",
     "client/",
     "server/",
     "shared/"
@@ -25,5 +22,7 @@
     "react-native": "0.81.5",
     "typescript": "^5.9.3",
     "zod": "^4.4.3"
-  }
+  },
+  "description": "macOS Classic light and dark themes for Paseo, ported from the Zed theme by huacnlee.",
+  "license": "MIT"
 }

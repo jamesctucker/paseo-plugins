@@ -1,15 +1,12 @@
 {
   "name": "agent-board",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
-    "OVERVIEW.*.md",
-    "index.client.ts",
     "index.client.tsx",
     "index.server.ts",
-    "index.server.tsx",
     "client/",
     "server/",
     "shared/"
@@ -27,5 +24,7 @@
     "typescript": "^5.9.3",
     "vitest": "^3.2.4",
     "zod": "^4.4.3"
-  }
+  },
+  "description": "A daily execution board: today's committed work on the left, live agents on the right.",
+  "license": "MIT"
 }
