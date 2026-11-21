@@ -7,6 +7,7 @@ import type {
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
+import { SpawnConfigScreen } from "./client/config";
 import { ReviewList } from "./client/review-list";
 import { ReviewWorkspaces } from "./client/review-workspaces";
 import { SummaryStrip } from "./client/summary-strip";
@@ -91,5 +92,11 @@ function ReviewQueueItem({ theme, openPopover }: PluginSidebarItemProps) {
 export default function contribute(client: PluginClientContext) {
   client.addScreen({ id: "review-queue", title: "Review queue", Component: ReviewQueueScreen });
   client.addSidebarHeaderItem({ id: "review-queue", title: "Review queue", Component: ReviewQueueItem });
+  client.addSettingsScreen({
+    id: "spawn",
+    title: "Review Queue",
+    icon: "GitPullRequestArrow",
+    Component: SpawnConfigScreen,
+  });
   return () => {};
 }

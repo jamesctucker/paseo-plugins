@@ -1,8 +1,15 @@
 import type { PluginTheme } from "@getpaseo/plugin";
-import { openExternalUrl, usePaseo } from "@getpaseo/plugin/client";
+import { openExternalUrl, usePaseo, useSettings } from "@getpaseo/plugin/client";
 import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { PullRequest } from "../shared/review-requests";
+import {
+  DEFAULT_PROMPT_TEMPLATE,
+  DEFAULT_SPAWN_SPEC,
+  DEFAULT_THINKING_OPTION,
+  renderReviewPrompt,
+  spawnConfigDoc,
+} from "../shared/review-requests";
 import { useReviewRequests } from "./use-review-requests";
 
 function relativeTime(iso: string): string {
@@ -30,6 +37,9 @@ type CreateState =
 
 function CreateWorkspaceButton({ pr, theme }: { pr: PullRequest; theme: PluginTheme }) {
   const paseo = usePaseo();
+  // The spawn provider, thinking level, and prompt are host-specific, so they
+  // come from settings with generic defaults rather than the code.
+  const config = useSettings(spawnConfigDoc);
   const [state, setState] = useState<CreateState>({ status: "idle" });
 
   async function createReviewWorkspace() {
@@ -45,20 +55,16 @@ function CreateWorkspaceButton({ pr, theme }: { pr: PullRequest; theme: PluginTh
           checkoutSource: { kind: "change_request", forge: "github", number: pr.number },
         },
       });
+      const spawn = config.status === "ready" ? config.values : null;
       // The handle knows the new worktree's directory; a combined create would need
       // a cwd that does not exist yet.
       await workspace.agents.create({
         config: {
           // provider/model in one string; the daemon splits on the first slash.
-          provider: "opencode/openrouter/moonshotai/kimi-k3",
-          thinkingOptionId: "high",
+          provider: spawn?.spawnSpec || DEFAULT_SPAWN_SPEC,
+          thinkingOptionId: spawn?.thinkingOptionId || DEFAULT_THINKING_OPTION,
         },
-        // The code-review skill is project-scoped to the-garage, so the agent in the
-        // PR worktree can only reach it by absolute path.
-        prompt:
-          `Read /Users/james/the-garage/.opencode/skills/engineering/code-review/SKILL.md and follow it ` +
-          `as a Mode A review of PR #${pr.number} (${pr.repo}): ${pr.url}. ` +
-          `The PR is already checked out in this workspace. Produce the tiered findings report; do not merge or push.`,
+        prompt: renderReviewPrompt(spawn?.promptTemplate || DEFAULT_PROMPT_TEMPLATE, pr),
       });
       setState({ status: "created" });
     } catch (cause) {

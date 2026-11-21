@@ -5,17 +5,15 @@
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
-    "OVERVIEW.*.md",
-    "index.client.ts",
     "index.client.tsx",
     "index.server.ts",
-    "index.server.tsx",
     "client/",
     "server/",
     "shared/"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.15.0",
@@ -25,6 +23,7 @@
     "react": "19.1.0",
     "react-native": "0.81.5",
     "typescript": "^5.9.3",
+    "vitest": "5.0.3",
     "zod": "^4.4.3"
   }
 }

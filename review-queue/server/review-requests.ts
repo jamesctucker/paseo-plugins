@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,20 +44,59 @@ async function search(scopeFlag: string): Promise<GhSearchItem[]> {
   return z.array(ghSearchItem).parse(JSON.parse(stdout));
 }
 
-// The daemon runs on the machine that holds the-garage; PR repos are expected as
-// sibling checkouts under work/ (see the workspace directory map).
-const GARAGE_ROOT = "/Users/james/the-garage";
-
-function localCheckoutFor(repo: string): string | null {
-  const name = repo.split("/")[1] ?? "";
-  const candidates = [
-    ...(name === "the-garage" ? [GARAGE_ROOT] : []),
-    `${GARAGE_ROOT}/work/${name}`,
-  ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+async function workspaceRoots(context: PluginHandlerContext): Promise<string[]> {
+  try {
+    const result = await context.paseo.workspaces.list({});
+    return result.entries
+      .map((entry) => entry.workspaceDirectory ?? entry.projectRootPath)
+      .filter((root: string | undefined | null): root is string => Boolean(root));
+  } catch {
+    return [];
+  }
 }
 
-export async function listRequestedReviews() {
+/** Pull "owner/name" out of a git remote URL, any of the common GitHub shapes. */
+export function parseOriginRepo(remoteUrl: string): string | null {
+  const match = /[:/]([^/:]+)\/([^/]+?)(?:\.git)?\s*$/.exec(remoteUrl.trim());
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
+async function originRepo(checkoutPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", checkoutPath, "remote", "get-url", "origin"], {
+      timeout: 5_000,
+    });
+    return parseOriginRepo(stdout);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find a local checkout of the PR's repo among the host's open workspaces.
+ * Candidates are the repo-named sibling under each workspace's work/ directory
+ * (plus a workspace that itself is the checkout). The checkout's origin must
+ * actually point at the PR's repo: two repos can share a name under different
+ * owners, and reviewing a worktree built from the wrong one looks identical to
+ * a successful review. GitHub compares owner/name case-insensitively.
+ */
+async function localCheckoutFor(repo: string, roots: string[]): Promise<string | null> {
+  const name = repo.split("/")[1] ?? "";
+  if (!name) return null;
+  const seen = new Set<string>();
+  for (const root of roots) {
+    for (const candidate of [path.join(root, "work", name), root]) {
+      if (candidate !== root && path.basename(candidate) !== name) continue;
+      if (seen.has(candidate) || !existsSync(candidate)) continue;
+      seen.add(candidate);
+      const origin = await originRepo(candidate);
+      if (origin && origin.toLowerCase() === repo.toLowerCase()) return candidate;
+    }
+  }
+  return null;
+}
+
+export async function listRequestedReviews(context: PluginHandlerContext) {
   let requested: GhSearchItem[];
   let assigned: GhSearchItem[];
   try {
@@ -70,23 +111,26 @@ export async function listRequestedReviews() {
     );
   }
 
+  const roots = await workspaceRoots(context);
   const requestedUrls = new Set(requested.map((item) => item.url));
   const assignedUrls = new Set(assigned.map((item) => item.url));
   const byUrl = new Map<string, GhSearchItem>();
   for (const item of [...requested, ...assigned]) byUrl.set(item.url, item);
 
-  const prs = [...byUrl.values()].map((item) => ({
-    repo: item.repository.nameWithOwner,
-    number: item.number,
-    title: item.title,
-    url: item.url,
-    author: item.author?.login ?? "unknown",
-    isDraft: item.isDraft ?? false,
-    reviewRequested: requestedUrls.has(item.url),
-    assigned: assignedUrls.has(item.url),
-    localCheckoutPath: localCheckoutFor(item.repository.nameWithOwner),
-    updatedAt: item.updatedAt,
-  }));
+  const prs = await Promise.all(
+    [...byUrl.values()].map(async (item) => ({
+      repo: item.repository.nameWithOwner,
+      number: item.number,
+      title: item.title,
+      url: item.url,
+      author: item.author?.login ?? "unknown",
+      isDraft: item.isDraft ?? false,
+      reviewRequested: requestedUrls.has(item.url),
+      assigned: assignedUrls.has(item.url),
+      localCheckoutPath: await localCheckoutFor(item.repository.nameWithOwner, roots),
+      updatedAt: item.updatedAt,
+    })),
+  );
   // Review requests first, then most recently updated.
   prs.sort((a, b) =>
     a.reviewRequested !== b.reviewRequested
