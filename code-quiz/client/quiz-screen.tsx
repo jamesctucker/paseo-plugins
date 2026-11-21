@@ -35,15 +35,18 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
   const trimmedTopic = topic.trim();
   const selectedFocus = focuses.find((focus) => focus.id === focusId);
 
-  // Restore last visit's selection once, when the repo list arrives.
+  // Restore last visit's selection once, when the repo list arrives. The
+  // focus and topic only mean something with their repo present.
   const restored = useRef(false);
   useEffect(() => {
     const data = reposQuery.data;
     if (!data?.last || restored.current) return;
     restored.current = true;
-    if (data.repos.some((repo) => repo.name === data.last?.repo)) setSelected(data.last.repo);
-    if (data.last.focusId) setFocusId(data.last.focusId);
-    if (data.last.topic) setTopic(data.last.topic);
+    if (data.repos.some((repo) => repo.name === data.last?.repo)) {
+      setSelected(data.last.repo);
+      if (data.last.focusId) setFocusId(data.last.focusId);
+      if (data.last.topic) setTopic(data.last.topic);
+    }
   }, [reposQuery.data]);
 
   // Cancel releases the UI immediately; if the launch RPC lands anyway, the
@@ -233,6 +236,10 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
               onPress={() => {
                 setSelected(repo.name);
                 setFocusId(null);
+                // The success beat belongs to the launch that produced it; a
+                // fresh pick re-arms the button in case the screen stayed
+                // mounted through the navigation.
+                setLaunched(false);
               }}
               style={[styles.repoRow, selected === repo.name ? styles.repoRowSelected : null]}
             >

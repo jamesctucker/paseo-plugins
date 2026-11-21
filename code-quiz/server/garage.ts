@@ -12,8 +12,10 @@ interface WorkspaceListEntry {
 // learning/ at its root and quizzes code under its work/ directory. Prefer the
 // workspace the daemon already knows about so the teacher agent lands in the
 // existing workspace instead of a duplicate; fall back to the conventional
-// home-directory path so the plugin still works on a fresh host.
-export async function resolveGarageRoot(entries: WorkspaceListEntry[]): Promise<string> {
+// home-directory path so the plugin still works on a fresh host. The checkout
+// must be named the-garage — the layout (work/, learning/, the teach skill)
+// is what the plugin targets, and the name is how it finds it.
+export function resolveGarageRoot(entries: WorkspaceListEntry[]): string {
   for (const entry of entries) {
     const dir = entry.workspaceDirectory ?? entry.projectRootPath;
     if (dir && path.basename(dir) === "the-garage") return dir;
@@ -23,7 +25,14 @@ export async function resolveGarageRoot(entries: WorkspaceListEntry[]): Promise<
 
 export async function listWorkRepos(garageRoot: string) {
   const workDir = path.join(garageRoot, "work");
-  const entries = await fs.readdir(workDir, { withFileTypes: true });
+  let entries;
+  try {
+    entries = await fs.readdir(workDir, { withFileTypes: true });
+  } catch {
+    throw new Error(
+      `No work/ directory under ${garageRoot}. Point the daemon at a workspace that follows the garage layout, or rename your checkout to the-garage.`,
+    );
+  }
   return entries
     .filter(
       (entry) =>

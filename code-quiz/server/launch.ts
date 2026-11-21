@@ -12,7 +12,7 @@ export async function handleListRepos(
   context: PluginHandlerContext,
 ) {
   const result = await context.paseo.workspaces.list({});
-  const garageRoot = await resolveGarageRoot(result.entries);
+  const garageRoot = resolveGarageRoot(result.entries);
   return { garageRoot, repos: await listWorkRepos(garageRoot), last: await readPrefs() };
 }
 
@@ -30,20 +30,20 @@ function buildPrompt(repo: string, topic?: string) {
   ].join("\n");
 }
 
-// The teacher always runs this model; check the live catalog so a missing
-// model fails with a clear error instead of a daemon-side rejection. The teach
-// skill only exists for OpenCode agents in the garage, so no other provider
-// can satisfy a launch.
-const TEACHER_MODEL = "openrouter/deepseek/deepseek-v4.1-flash";
+// Preferred teacher model: fast and cheap for quiz-style lessons. Any OpenCode
+// model can run them, so a host without this exact model falls back to the
+// catalog's first available instead of failing the launch.
+const PREFERRED_MODEL = "openrouter/deepseek/deepseek-v4.1-flash";
 
 async function resolveProviderSpec(context: PluginHandlerContext): Promise<string> {
   const snapshot = await context.paseo.providers.snapshot();
   const entries = (snapshot.entries ?? []) as { provider: string; models?: { id: string }[] }[];
   const models = entries.find((entry) => entry.provider === "opencode")?.models ?? [];
-  if (!models.some((model) => model.id === TEACHER_MODEL)) {
-    throw new Error(`Model ${TEACHER_MODEL} is not in this host's OpenCode catalog.`);
+  const model = models.find((candidate) => candidate.id === PREFERRED_MODEL)?.id ?? models[0]?.id;
+  if (!model) {
+    throw new Error("No OpenCode models are configured on this host.");
   }
-  return `opencode/${TEACHER_MODEL}`;
+  return `opencode/${model}`;
 }
 
 export async function handleLaunchTeacher(
@@ -59,7 +59,7 @@ export async function handleLaunchTeacher(
   const effectiveTopic = trimmedTopic || focusPrompt || undefined;
 
   const listed = await context.paseo.workspaces.list({});
-  const garageRoot = await resolveGarageRoot(listed.entries);
+  const garageRoot = resolveGarageRoot(listed.entries);
 
   const repoPath = path.join(garageRoot, "work", repo);
   const stat = await fs.stat(repoPath).catch(() => null);
@@ -85,6 +85,9 @@ export async function handleLaunchTeacher(
     repo,
     ...(focusId ? { focusId } : {}),
     ...(trimmedTopic ? { topic: trimmedTopic } : {}),
+  }).catch(() => {
+    // The teacher is already running; losing the remembered repo and focus
+    // is cosmetic and must not turn a successful launch into an error.
   });
   return { agentId: agent.id, workspaceId: workspace.id, title };
 }
