@@ -4,7 +4,7 @@ import type { RpcInput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { launchTeacher, listRepos } from "../shared/quiz";
 import { getFocusesForRepo } from "../shared/focuses";
-import { listWorkRepos, resolveGarageRoot } from "./garage";
+import { discoverRepos, isValidRepoPath, lessonDirFor } from "./repos";
 import { readPrefs, writePrefs } from "./prefs";
 
 export async function handleListRepos(
@@ -12,21 +12,34 @@ export async function handleListRepos(
   context: PluginHandlerContext,
 ) {
   const result = await context.paseo.workspaces.list({});
-  const garageRoot = resolveGarageRoot(result.entries);
-  return { garageRoot, repos: await listWorkRepos(garageRoot), last: await readPrefs() };
+  const repos = await discoverRepos(result.entries);
+  return {
+    repos: repos.map(({ path: repoPath, name, workspaceId }) => ({ path: repoPath, name, workspaceId })),
+    last: await readPrefs(),
+  };
 }
 
-function buildPrompt(repo: string, topic?: string) {
+/**
+ * The teaching loop, inlined. The agent gets everything it needs to run a
+ * calibrating quiz and build persistent lessons without depending on any skill
+ * installed in the workspace.
+ */
+export function buildPrompt(repoPath: string, repoName: string, topic?: string): string {
+  const location = repoPath === "." ? "this workspace's root repo" : `the repo at \`${repoPath}/\``;
   const focus = topic?.trim()
-    ? `the "${topic.trim()}" part of the repo at \`work/${repo}/\``
-    : `the overall architecture of the repo at \`work/${repo}/\``;
+    ? `the "${topic.trim()}" part of ${location}`
+    : `the overall architecture of ${location}`;
+  const lessonDir = lessonDirFor(repoPath);
   return [
-    `Use the teach skill to teach me about ${focus}.`,
+    `Teach me ${focus}.`,
     "",
-    "The code itself is the primary resource: read the repo's README, AGENTS.md, and the relevant source files before writing RESOURCES.md.",
-    `Set up (or resume) the learning workspace at \`learning/${repo}/\` per the skill.`,
+    "How to teach:",
+    `- The code is the primary resource: read the repo's README and the relevant source files before writing anything.`,
+    `- Start by quizzing me with a few questions about the code to calibrate what I already know. Ask one question at a time and wait for my answer.`,
+    `- Then build the first lesson from my answers: a short, self-contained HTML page saved under \`${lessonDir}/\`, plus a plain-text reference sheet for the durable facts (commands, terminology, file locations).`,
+    `- Resume from whatever already exists under \`${lessonDir}/\` if I have been here before.`,
     "",
-    "Start by quizzing me with a few questions about the code to calibrate what I already know, then build the first lesson from my answers.",
+    `The repo to teach is \`${repoName}\`, already inside this workspace.`,
   ].join("\n");
 }
 
@@ -50,39 +63,49 @@ export async function handleLaunchTeacher(
   input: RpcInput<typeof launchTeacher>,
   context: PluginHandlerContext,
 ) {
-  const { repo, focusId, topic } = input;
+  const { workspaceId, repoPath, focusId, topic } = input;
   const trimmedTopic = topic?.trim();
   // Same precedence as the screen: custom text beats a chip.
   const focusPrompt = focusId
-    ? getFocusesForRepo(repo).find((focus) => focus.id === focusId)?.prompt
+    ? getFocusesForRepo(path.basename(repoPath)).find((focus) => focus.id === focusId)?.prompt
     : undefined;
   const effectiveTopic = trimmedTopic || focusPrompt || undefined;
 
   const listed = await context.paseo.workspaces.list({});
-  const garageRoot = resolveGarageRoot(listed.entries);
-
-  const repoPath = path.join(garageRoot, "work", repo);
-  const stat = await fs.stat(repoPath).catch(() => null);
-  if (!stat?.isDirectory()) {
-    throw new Error(`No repo named "${repo}" under ${path.join(garageRoot, "work")}.`);
+  const entry = listed.entries.find((candidate) => candidate.id === workspaceId);
+  const workspaceDirectory = entry?.workspaceDirectory ?? entry?.projectRootPath;
+  if (!workspaceDirectory) {
+    throw new Error("That workspace is not open on this host.");
   }
 
-  const existing = listed.entries.find(
-    (entry) => (entry.workspaceDirectory ?? entry.projectRootPath) === garageRoot,
-  );
-  const workspace = existing
-    ? context.paseo.workspaces.ref(existing.id)
-    : await context.paseo.workspaces.create({ source: { kind: "directory", path: garageRoot } });
+  // repoPath normally echoes a discovered repo, but treat it as untrusted: the
+  // segment charset rules out traversal, and the stat must land inside the
+  // workspace root (realpath on both, so a symlink cannot redirect it).
+  if (!isValidRepoPath(repoPath)) {
+    throw new Error("Not a valid repo path.");
+  }
+  const root = await fs.realpath(workspaceDirectory);
+  const repoDir = path.join(root, repoPath);
+  const realRepo = await fs.realpath(repoDir).catch(() => null);
+  if (
+    !realRepo ||
+    !(realRepo === root || realRepo.startsWith(root + path.sep)) ||
+    !(await fs.stat(realRepo).then((stat) => stat.isDirectory()).catch(() => false))
+  ) {
+    throw new Error(`No repo named "${repoPath}" in that workspace.`);
+  }
+  const repoName = path.basename(realRepo);
 
+  const workspace = context.paseo.workspaces.ref(workspaceId);
   const provider = await resolveProviderSpec(context);
-  const title = effectiveTopic ? `Learn ${repo}: ${trimmedTopic || focusId}` : `Learn ${repo}`;
+  const title = effectiveTopic ? `Learn ${repoName}: ${trimmedTopic || focusId}` : `Learn ${repoName}`;
   const agent = await workspace.agents.create({
     config: { provider },
-    prompt: buildPrompt(repo, effectiveTopic),
+    prompt: buildPrompt(repoPath, repoName, effectiveTopic),
     title,
   });
   await writePrefs({
-    repo,
+    repo: repoPath,
     ...(focusId ? { focusId } : {}),
     ...(trimmedTopic ? { topic: trimmedTopic } : {}),
   }).catch(() => {

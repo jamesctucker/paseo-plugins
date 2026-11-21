@@ -29,7 +29,8 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
     [],
   );
 
-  const focuses = getFocusesForRepo(selected);
+  const repos = reposQuery.data?.repos ?? [];
+  const focuses = getFocusesForRepo(repos.find((repo) => repo.path === selected)?.name ?? null);
   // Custom text wins over a chip: typing is the stronger signal of intent.
   // Neither input destroys the other — the summary line shows which one applies.
   const trimmedTopic = topic.trim();
@@ -42,7 +43,7 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
     const data = reposQuery.data;
     if (!data?.last || restored.current) return;
     restored.current = true;
-    if (data.repos.some((repo) => repo.name === data.last?.repo)) {
+    if (data.repos.some((repo) => repo.path === data.last?.repo)) {
       setSelected(data.last.repo);
       if (data.last.focusId) setFocusId(data.last.focusId);
       if (data.last.topic) setTopic(data.last.topic);
@@ -52,13 +53,18 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
   // Cancel releases the UI immediately; if the launch RPC lands anyway, the
   // orphaned teacher agent is archived so a cancel never strands a session.
   const cancelled = useRef(false);
+  const selectedRepo = repos.find((repo) => repo.path === selected) ?? null;
   const mutation = useMutation({
-    mutationFn: (repo: string) =>
-      launch({
-        repo,
+    mutationFn: (repoPath: string) => {
+      const repo = repos.find((candidate) => candidate.path === repoPath);
+      if (!repo) throw new Error("Pick a repo first.");
+      return launch({
+        workspaceId: repo.workspaceId,
+        repoPath,
         focusId: selectedFocus?.id,
         topic: trimmedTopic ? trimmedTopic : undefined,
-      }),
+      });
+    },
     onMutate: () => {
       cancelled.current = false;
     },
@@ -177,19 +183,18 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
     [theme, layout.compact],
   );
 
-  const repos = reposQuery.data?.repos ?? [];
   const trimmedFilter = filter.trim().toLowerCase();
   const visibleRepos = trimmedFilter
-    ? repos.filter((repo) => repo.name.toLowerCase().includes(trimmedFilter))
+    ? repos.filter((repo) => repo.path.toLowerCase().includes(trimmedFilter))
     : repos;
-  const canLaunch = selected !== null && !mutation.isPending && !launched;
+  const canLaunch = selectedRepo !== null && !mutation.isPending && !launched;
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.heading}>Quiz me on a repo</Text>
       <Text style={styles.hint}>
-        Pick a repo from work/ and a teacher agent will quiz you on its code, then turn your
-        answers into lessons.
+        Pick a repo from your open workspaces and a teacher agent will quiz you on its code, then
+        turn your answers into lessons.
       </Text>
 
       <View style={styles.section}>
@@ -202,7 +207,7 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
         ) : null}
         {reposQuery.isError ? (
           <View style={{ gap: 4 }}>
-            <Text style={styles.error}>Couldn&apos;t read the repos under work/ on this host.</Text>
+            <Text style={styles.error}>Couldn&apos;t read the repos in your open workspaces.</Text>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Retry loading repos"
@@ -214,7 +219,7 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
           </View>
         ) : null}
         {reposQuery.isSuccess && repos.length === 0 ? (
-          <Text style={styles.hint}>No repos found under work/ on this host.</Text>
+          <Text style={styles.hint}>No git repos found in your open workspaces.</Text>
         ) : null}
         {repos.length > 6 ? (
           <TextInput
@@ -234,20 +239,20 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
               accessibilityState={{ selected: selected === repo.name }}
               accessibilityLabel={`Select repo ${repo.name}`}
               onPress={() => {
-                setSelected(repo.name);
+                setSelected(repo.path);
                 setFocusId(null);
                 // The success beat belongs to the launch that produced it; a
                 // fresh pick re-arms the button in case the screen stayed
                 // mounted through the navigation.
                 setLaunched(false);
               }}
-              style={[styles.repoRow, selected === repo.name ? styles.repoRowSelected : null]}
+              style={[styles.repoRow, selected === repo.path ? styles.repoRowSelected : null]}
             >
               <Text
                 numberOfLines={1}
-                style={[styles.repoName, selected === repo.name ? styles.repoNameSelected : null]}
+                style={[styles.repoName, selected === repo.path ? styles.repoNameSelected : null]}
               >
-                {repo.name}
+                {repo.path}
               </Text>
             </Pressable>
           ))}

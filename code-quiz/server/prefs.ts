@@ -2,8 +2,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// Last-used repo/focus lives in a homedir dotfile: per-daemon, not synced via
-// the garage git repo, and readable before any workspace lookup.
+// Last-used repo/focus lives in a homedir dotfile: per-daemon, never committed
+// to a workspace repo, and readable before any workspace lookup.
 const PREFS_PATH = path.join(os.homedir(), ".code-quiz-prefs.json");
 
 export interface CodeQuizPrefs {

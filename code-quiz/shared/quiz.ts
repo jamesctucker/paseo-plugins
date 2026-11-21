@@ -5,8 +5,16 @@ export const listRepos = defineRpc({
   name: "code-quiz.list-repos",
   input: z.object({}),
   output: z.object({
-    garageRoot: z.string(),
-    repos: z.array(z.object({ name: z.string(), path: z.string() })),
+    repos: z.array(
+      z.object({
+        /** Repo identity: path relative to its workspace root, e.g. "work/api". */
+        path: z.string(),
+        /** Display name: the repo directory's basename. */
+        name: z.string(),
+        /** Id of the workspace the repo lives under; the teacher runs there. */
+        workspaceId: z.string(),
+      }),
+    ),
     last: z
       .object({
         repo: z.string(),
@@ -17,14 +25,17 @@ export const listRepos = defineRpc({
   }),
 });
 
-// repo is a single path segment; the server joins it under <garage>/work and
-// the regex is what keeps a crafted value from escaping that directory. focusId
-// and topic arrive unresolved so the server can both compose the prompt and
-// persist the exact UI state for next visit.
+// repoPath is workspace-relative and discovered server-side; the segment
+// charset (each piece of the path must match the repo-name regex, so no "..",
+// absolute paths, or empty segments) is the first guard, and the server
+// additionally stats the joined path and requires it to stay under the
+// workspace root. focusId and topic arrive unresolved so the server can both
+// compose the prompt and persist the exact UI state for next visit.
 export const launchTeacher = defineRpc({
   name: "code-quiz.launch-teacher",
   input: z.object({
-    repo: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+    workspaceId: z.string().min(1),
+    repoPath: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]*$/),
     focusId: z.string().optional(),
     topic: z.string().max(200).optional(),
   }),

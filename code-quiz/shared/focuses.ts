@@ -36,7 +36,7 @@ export const DEFAULT_FOCUSES: FocusOption[] = [
 ];
 
 // Repo-specific angles (a notable subsystem, a known-tricky module) belong here
-// keyed by directory name under work/; they show up ahead of the defaults.
+// keyed by repo directory name; they show up ahead of the defaults.
 const FOCUS_EXTRAS: Record<string, FocusOption[]> = {};
 
 export function getFocusesForRepo(repo: string | null): FocusOption[] {
