@@ -63,8 +63,7 @@ export function useArchiveUndo(board: BoardDoc): { undo: ArchiveUndo | null; run
 
   function runUndo() {
     if (!current) return;
-    const next = applyArchiveUndo(board.values.cards, current);
-    void board.saveCards(next).then((reason) => {
+    void board.updateCards((cards) => applyArchiveUndo(cards, current)).then((reason) => {
       if (reason) {
         toast.show(`Couldn't undo — ${reason}`, { variant: "error" });
         return;

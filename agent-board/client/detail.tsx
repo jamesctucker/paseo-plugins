@@ -216,9 +216,9 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
     );
   }
 
-  function save(next: typeof cards) {
-    // A rejected write's reason rides the saveCards promise; never swallow it.
-    void board.saveCards(next).then((reason) => {
+  function save(change: (cards: BoardCard[]) => BoardCard[]) {
+    // A rejected write's reason rides the promise; never swallow it.
+    void board.updateCards(change).then((reason) => {
       if (reason) toast.show(`Couldn't save — ${reason}`, { variant: "error" });
     });
   }
@@ -235,7 +235,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
     // day would birth an instantly-stale card. The draft clears only after
     // the save lands — a rejected write must not eat the typed title.
     const sibling = { ...siblingTaskCard(card, title, newCardId(), new Date().toISOString()), day: localDay(new Date()) };
-    void board.saveCards(insertAtGroupEnd(cards, sibling)).then((reason) => {
+    void board.updateCards((current) => insertAtGroupEnd(current, sibling)).then((reason) => {
       if (reason) {
         toast.show(`Couldn't save — ${reason}`, { variant: "error" });
         return;
@@ -249,19 +249,31 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
    * state celebrates on its own, but archiving from here keeps you on this
    * screen, so the last card of the day would otherwise land in silence.
    */
-  function saveArchive(next: typeof cards, undo?: ArchiveUndo | null) {
+  function saveArchive(ids: ReadonlySet<string>) {
     const today = localDay(new Date());
-    const clearsDay = !next.some((entry) => !entry.archivedAt && entry.day !== null && entry.day >= today);
-    void board.saveCards(next).then((reason) => {
-      if (reason) {
-        toast.show(`Couldn't save — ${reason}`, { variant: "error" });
-        return;
-      }
-      // The undo offer rides the confirmed save — offering a reversal for an
-      // archive that never landed would un-archive whatever wins the conflict.
-      if (undo) pushArchiveUndo(undo);
-      if (clearsDay) toast.show("That was the last one. Day's clear.", { variant: "success" });
-    });
+    const stamp = new Date().toISOString();
+    // The transform runs once per rebase attempt; after resolution these hold
+    // the values from the attempt that actually landed.
+    let landed: { undo: ArchiveUndo | null; clearsDay: boolean } | null = null;
+    void board
+      .updateCards((current) => {
+        const { next, undo } = recordArchive(current, ids, stamp);
+        landed = {
+          undo,
+          clearsDay: !next.some((entry) => !entry.archivedAt && entry.day !== null && entry.day >= today),
+        };
+        return next;
+      })
+      .then((reason) => {
+        if (reason) {
+          toast.show(`Couldn't save — ${reason}`, { variant: "error" });
+          return;
+        }
+        // The undo offer rides the confirmed save — offering a reversal for an
+        // archive that never landed would un-archive whatever wins the conflict.
+        if (landed?.undo) pushArchiveUndo(landed.undo);
+        if (landed?.clearsDay) toast.show("That was the last one. Day's clear.", { variant: "success" });
+      });
   }
 
   function archiveAll() {
@@ -270,8 +282,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
     const key = card ? cardKey(card) : null;
     if (!key) return;
     const ids = new Set(cards.filter((entry) => cardKey(entry) === key).map((entry) => entry.id));
-    const { next, undo } = recordArchive(cards, ids, new Date().toISOString());
-    saveArchive(next, undo);
+    saveArchive(ids);
   }
 
   const runStartedAt = card.runs.length > 0 ? Date.parse(card.runs[card.runs.length - 1].startedAt) : null;
@@ -696,10 +707,11 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
               }
               disarmArchive();
               if (card.archivedAt) {
-                save(cards.map((entry) => (entry.id === card.id ? { ...entry, archivedAt: null } : entry)));
+                save((current) =>
+                  current.map((entry) => (entry.id === card.id ? { ...entry, archivedAt: null } : entry)),
+                );
               } else {
-                const { next, undo } = recordArchive(cards, new Set([card.id]), new Date().toISOString());
-                saveArchive(next, undo);
+                saveArchive(new Set([card.id]));
               }
             }}
             style={{
@@ -727,7 +739,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
               // A completed delete is a success, not a missing card: leave
               // the detail screen for the board instead of stranding the
               // user on error-shaped copy.
-              void board.saveCards(cards.filter((entry) => entry.id !== card.id)).then((reason) => {
+              void board.updateCards((current) => current.filter((entry) => entry.id !== card.id)).then((reason) => {
                 if (reason) {
                   toast.show(`Couldn't save — ${reason}`, { variant: "error" });
                   return;
@@ -759,8 +771,9 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
         open={spawnOpen}
         onOpenChange={setSpawnOpen}
         onSpawned={(cardId, run) => {
-          const next = cards.map((entry) => (entry.id === cardId ? { ...entry, runs: [...entry.runs, run] } : entry));
-          save(next);
+          save((current) =>
+            current.map((entry) => (entry.id === cardId ? { ...entry, runs: [...entry.runs, run] } : entry)),
+          );
         }}
         onOpenAgent={(agentId) => navigation?.openAgent({ agentId })}
       />

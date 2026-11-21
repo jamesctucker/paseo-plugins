@@ -20,7 +20,7 @@ import { clearedToday, doneThisWeek, doneTodayCount, localDay, staleCards } from
 import { inboxCards, moveInboxToToday } from "../shared/inbox";
 import { parseQuickAdd } from "../shared/tracker";
 import { buildGroups, insertAtGroupEnd, isDuplicate, placeCard, showHeader, type CardGroup } from "../shared/groups";
-import { recordArchive } from "../shared/undo";
+import { recordArchive, type ArchiveUndo } from "../shared/undo";
 import { ArchiveUndoBar, pushArchiveUndo, useArchiveUndo } from "./undo";
 import { prSignalForCard } from "../shared/pr-signal";
 import { useWorkspaceRuntimes } from "./workspace-runtime";
@@ -210,16 +210,18 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
       setError(`${key} task "${card.title}" is already on the board`);
       return false;
     }
-    return saveOrExplain(insertAtGroupEnd(cards, card));
+    return saveOrExplain((current) => insertAtGroupEnd(current, card));
   }
 
   /**
-   * A rejected write's reason rides the saveCards promise (conflict vs
+   * A rejected write's reason rides the updateCards promise (conflict vs
    * schema-invalid vs bridge failure). Show it — the generic "try again"
    * hides the difference between a retryable conflict and a real bug.
    */
-  async function saveOrExplain(next: BoardCard[]): Promise<boolean> {
-    const reason = await board.saveCards(next);
+  async function saveOrExplain(
+    change: (cards: BoardCard[]) => BoardCard[],
+  ): Promise<boolean> {
+    const reason = await board.updateCards(change);
     if (reason) setError(`Couldn't save — ${reason}`);
     return reason === null;
   }
@@ -367,7 +369,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
         }
       }
       const card: BoardCard = { ...taskCardBase(null), source: "prompt", title: parsed.title };
-      return await saveOrExplain([...cards, card]);
+      return await saveOrExplain((current) => [...current, card]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       return false;
@@ -383,9 +385,11 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
 
   function placeReorder(targetIndex: number) {
     if (!reorderId) return;
-    const next = placeCard(cards, visibleCards, reorderId, targetIndex);
+    const movingId = reorderId;
     setReorderId(null);
-    void saveOrExplain(next);
+    // placeCard anchors on card ids, so it stays correct when the transform
+    // rebases onto a doc that moved since this render.
+    void saveOrExplain((current) => placeCard(current, visibleCards, movingId, targetIndex));
   }
 
   // Keyboard reorder (Workboard borrow): while a move is armed, arrows walk
@@ -406,15 +410,25 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     }
     const target = Math.max(0, Math.min(visibleCards.length - 1, index + (key === "ArrowUp" ? -1 : 1)));
     if (target === index) return;
-    void saveOrExplain(placeCard(cards, visibleCards, reorderId, target));
+    void saveOrExplain((current) => placeCard(current, visibleCards, reorderId, target));
   }
 
   function archiveGroup(group: CardGroup) {
     const ids = new Set(group.cards.map((card) => card.id));
-    const { next, undo } = recordArchive(cards, ids, new Date().toISOString());
-    void saveOrExplain(next).then((saved) => {
-      if (saved && undo) pushArchiveUndo(undo);
-    });
+    const stamp = new Date().toISOString();
+    // The transform runs once per rebase attempt; after resolution this holds
+    // the undo from the attempt that actually landed.
+    let landed: ArchiveUndo | null = null;
+    void board
+      .updateCards((current) => {
+        const { next, undo } = recordArchive(current, ids, stamp);
+        landed = undo;
+        return next;
+      })
+      .then((reason) => {
+        if (reason) setError(`Couldn't save — ${reason}`);
+        else if (landed) pushArchiveUndo(landed);
+      });
   }
 
   /** CI/review chips ride the latest run's workspace; unlinked cards stay PAT-only. */
@@ -570,7 +584,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
       <InboxSection
         theme={theme}
         cards={inbox}
-        onMove={(ids) => saveOrExplain(moveInboxToToday(cards, ids, today))}
+        onMove={(ids) => saveOrExplain((current) => moveInboxToToday(current, ids, today))}
       />
     ) : null;
 

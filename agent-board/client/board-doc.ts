@@ -18,6 +18,7 @@ import type { AgentEntry } from "./agent-directory";
  * returning it through React state would hand callers the stale render's null.
  */
 
+const boardReadRpc = settingsRpc("board").read;
 const boardWriteRpc = settingsRpc("board").write;
 
 export interface BoardDoc {
@@ -28,6 +29,15 @@ export interface BoardDoc {
   /** Null when saved; the host's rejection reason otherwise. */
   saveValues(next: BoardValues): Promise<string | null>;
   saveCards(cards: BoardCard[]): Promise<string | null>;
+  /**
+   * Apply a transform to the live card list. Two gestures inside one
+   * settings-propagation window, the note autosave, or another client can move
+   * the doc between render and write; on a write conflict the transform is
+   * re-applied to the freshly read doc and retried, so concurrent writes no
+   * longer drop the later action. Transforms must be pure (they can run more
+   * than once) and should key on card ids, not closure state.
+   */
+  updateCards(transform: (cards: BoardCard[]) => BoardCard[]): Promise<string | null>;
   answerMigration(carry: boolean): Promise<boolean>;
   dismissAttention(agentId: string, stamp: string): Promise<boolean>;
   addManualGate(text: string): Promise<string | null>;
@@ -40,10 +50,14 @@ export interface BoardDoc {
   declineLink(cardId: string, agentId: string): Promise<string | null>;
 }
 
+/** Conflict-rebase attempts before giving up and surfacing the reason. */
+const WRITE_ATTEMPTS = 3;
+
 export function useBoardDoc(): BoardDoc {
   const settings = useSettings(boardDoc);
   const paseo = usePaseo();
   const writeBoard = useRpc(boardWriteRpc);
+  const readBoard = useRpc(boardReadRpc);
   const lastGood = useRef<BoardValues>({
     cards: [],
     migrationAnsweredDay: "",
@@ -81,6 +95,45 @@ export function useBoardDoc(): BoardDoc {
     [ready, revision],
   );
 
+  /**
+   * Rebase-and-retry core for every board mutation. The first attempt builds
+   * on the values this screen rendered; a conflict re-reads the live doc and
+   * re-applies the transform to it, so a concurrent write neither blocks this
+   * action nor gets clobbered by it. saveValues stays single-shot: a fully
+   * precomputed doc cannot be rebased, which is exactly why racing callers use
+   * updateCards and the keyed mutators instead.
+   */
+  const mutate = useCallback(
+    async (transform: (current: BoardValues) => BoardValues): Promise<string | null> => {
+      if (!ready) return "Board is not connected";
+      let current = values;
+      let currentRevision = revision;
+      for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
+        let result;
+        try {
+          result = await writeBoard({ revision: currentRevision, values: transform(current) });
+        } catch (cause) {
+          return cause instanceof Error ? cause.message : String(cause);
+        }
+        if (result.status === "saved") return null;
+        if (result.status === "invalid") return result.error;
+        let fresh;
+        try {
+          fresh = await readBoard({});
+        } catch (cause) {
+          return cause instanceof Error ? cause.message : String(cause);
+        }
+        if (fresh.status !== "ready") return fresh.error;
+        current = fresh.values as BoardValues;
+        currentRevision = fresh.revision;
+      }
+      return "The board kept changing while saving; try again";
+    },
+    // values/revision are the rebase starting point; the RPC identities are stable
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ready, values, revision, readBoard],
+  );
+
   const saveCards = useCallback(
     async (cards: BoardCard[]) => saveValues({ ...values, cards }),
     // values captured per render is intended: card edits build on the latest read
@@ -88,71 +141,81 @@ export function useBoardDoc(): BoardDoc {
     [values, saveValues],
   );
 
+  const updateCards = useCallback(
+    async (transform: (cards: BoardCard[]) => BoardCard[]) =>
+      mutate((current) => ({ ...current, cards: transform(current.cards) })),
+    [mutate],
+  );
+
   const answerMigration = useCallback(
     async (carry: boolean) => {
       const today = localDay(new Date());
-      const cards = carry ? carryOver(values.cards, today) : dropStale(values.cards, today);
-      return (await saveValues({ ...values, cards, migrationAnsweredDay: today })) === null;
+      const reason = await mutate((current) => ({
+        ...current,
+        cards: carry ? carryOver(current.cards, today) : dropStale(current.cards, today),
+        migrationAnsweredDay: today,
+      }));
+      return reason === null;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [values, saveValues],
+    [mutate],
   );
 
   const dismissAttention = useCallback(
     async (agentId: string, stamp: string) => {
-      const reason = await saveValues({ ...values, dismissedAttention: { ...values.dismissedAttention, [agentId]: stamp } });
+      const reason = await mutate((current) => ({
+        ...current,
+        dismissedAttention: { ...current.dismissedAttention, [agentId]: stamp },
+      }));
       return reason === null;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [values, saveValues],
+    [mutate],
   );
 
   const addManualGate = useCallback(
     async (text: string) =>
-      saveValues({
-        ...values,
+      mutate((current) => ({
+        ...current,
         manualGates: {
-          ...values.manualGates,
+          ...current.manualGates,
           [`gate-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`]: {
             text,
             createdAt: new Date().toISOString(),
           },
         },
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [values, saveValues],
+      })),
+    [mutate],
   );
 
   const removeManualGate = useCallback(
-    async (id: string) => {
-      const manualGates = { ...values.manualGates };
-      delete manualGates[id];
-      return saveValues({ ...values, manualGates });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [values, saveValues],
+    async (id: string) =>
+      mutate((current) => {
+        const manualGates = { ...current.manualGates };
+        delete manualGates[id];
+        return { ...current, manualGates };
+      }),
+    [mutate],
   );
 
   const clearDoneNag = useCallback(
     async (key: string) =>
-      saveValues({
-        ...values,
-        clearedDoneNags: { ...values.clearedDoneNags, [key]: new Date().toISOString() },
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [values, saveValues],
+      mutate((current) => ({
+        ...current,
+        clearedDoneNags: { ...current.clearedDoneNags, [key]: new Date().toISOString() },
+      })),
+    [mutate],
   );
 
   const saveNote = useCallback(
     async (key: string, text: string) => {
-      const cardNotes = { ...values.cardNotes };
       const trimmed = text.trim();
-      if (trimmed) cardNotes[key] = { text: trimmed, updatedAt: new Date().toISOString() };
-      else delete cardNotes[key];
-      return saveValues({ ...values, cardNotes });
+      return mutate((current) => {
+        const cardNotes = { ...current.cardNotes };
+        if (trimmed) cardNotes[key] = { text: trimmed, updatedAt: new Date().toISOString() };
+        else delete cardNotes[key];
+        return { ...current, cardNotes };
+      });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [values, saveValues],
+    [mutate],
   );
 
   const linkAgent = useCallback(
@@ -171,23 +234,20 @@ export function useBoardDoc(): BoardDoc {
       }
       if (!workspaceId) return "Couldn't find that agent's workspace";
       const run = { agentId: agent.id, workspaceId, startedAt: agent.createdAt };
-      return saveValues({
-        ...values,
-        cards: values.cards.map((card) => (card.id === cardId ? { ...card, runs: [...card.runs, run] } : card)),
-      });
+      return updateCards((cards) =>
+        cards.map((card) => (card.id === cardId ? { ...card, runs: [...card.runs, run] } : card)),
+      );
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [values, saveValues, paseo],
+    [updateCards, paseo],
   );
 
   const declineLink = useCallback(
     async (cardId: string, agentId: string) =>
-      saveValues({
-        ...values,
-        declinedLinks: { ...values.declinedLinks, [declineKey(cardId, agentId)]: new Date().toISOString() },
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [values, saveValues],
+      mutate((current) => ({
+        ...current,
+        declinedLinks: { ...current.declinedLinks, [declineKey(cardId, agentId)]: new Date().toISOString() },
+      })),
+    [mutate],
   );
 
   return {
@@ -197,6 +257,7 @@ export function useBoardDoc(): BoardDoc {
     offline,
     saveValues,
     saveCards,
+    updateCards,
     answerMigration,
     dismissAttention,
     addManualGate,
