@@ -76,7 +76,7 @@ export const boardDoc = defineSettings({
     /**
      * Hand-written "Waiting on you" items (quick-add `! text`) for gates no
      * machine can detect — probes to run, grants to give, conversations owed.
-     * They persist until James checks them off; everything else on the
+     * They persist until you check them off; everything else on the
      * surface is derived and self-clears.
      */
     manualGates: z.record(z.string(), z.object({ text: z.string(), createdAt: z.string() })).default({}),

@@ -12,7 +12,7 @@ function prCard(partial: Partial<BoardCard> = {}): BoardCard {
     createdAt: "2026-11-10T09:00:00.000Z",
     archivedAt: null,
     runs: [],
-    github: { repo: "jamesctucker/grove", number: 42 },
+    github: { repo: "acme/api", number: 42 },
     ...partial,
   };
 }
@@ -27,7 +27,7 @@ describe("prSignalForCard", () => {
   it("matches on PR number, and on repo when the host names one", () => {
     const pr = { number: 42, state: "open", checksStatus: "success" };
     expect(prSignalForCard(prCard(), pr)?.checksStatus).toBe("success");
-    expect(prSignalForCard(prCard(), { ...pr, repoOwner: "jamesctucker", repoName: "grove" })?.checksStatus).toBe("success");
+    expect(prSignalForCard(prCard(), { ...pr, repoOwner: "acme", repoName: "api" })?.checksStatus).toBe("success");
     expect(prSignalForCard(prCard(), { ...pr, repoOwner: "other", repoName: "grove" })).toBeNull();
   });
 

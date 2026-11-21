@@ -40,7 +40,7 @@ function input(overrides: Partial<ComputeGatesInput>): ComputeGatesInput {
 function chain(issues: Partial<ChainInfo["issues"][number]>[]): ChainInfo {
   return {
     projectId: "proj-1",
-    projectName: "Rolodex",
+    projectName: "Website",
     issues: issues.map((issue, index) => ({
       key: issue.key ?? `ENG-${index + 1}`,
       title: issue.title ?? `Issue ${index + 1}`,

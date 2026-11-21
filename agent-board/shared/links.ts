@@ -85,7 +85,7 @@ const isLive = (agent: LinkableAgent | undefined) => agent?.status === "running"
  * Card id → agents worth offering, most recently active first. Skips archived
  * cards, cards whose latest run is still live (a second agent there is noise),
  * subagents (their parent is the thing to link), closed agents, agents any
- * card already holds, and pairs James declined.
+ * card already holds, and pairs the user declined.
  */
 export function linkSuggestions<A extends LinkableAgent>(
   cards: readonly LinkableCard[],

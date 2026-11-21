@@ -17,7 +17,7 @@ import type { AgentEntry, PermissionRequestLite } from "./agent-directory";
  * better-paseo's question.
  *
  * Review opens with "Waiting on you": the standing gates (chain stalls,
- * not-Done tracker issues, review asks, manual reminders) that only James
+ * not-Done tracker issues, review asks, manual reminders) that only the user
  * clears — agent attention comes second because it usually answers itself.
  */
 
@@ -267,7 +267,7 @@ function StopControl({ theme, pending, onStop }: { theme: PluginTheme; pending: 
   );
 }
 
-/** Copy per gate kind; the row's right-aligned label says what James owes. */
+/** Copy per gate kind; the row's right-aligned label says what the user owes. */
 function gateLabel(gate: Gate): string {
   switch (gate.kind) {
     case "chain-yours":

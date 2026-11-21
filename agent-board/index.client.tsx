@@ -54,7 +54,7 @@ function BoardItem({ theme, currentScreen, openScreen }: PluginSidebarItemProps)
   const counts = useMemo(() => {
     const counts = laneCounts(board.values.cards, agents);
     // Gates are needs-you items: chain stalls, not-Done nags, review asks,
-    // and manual reminders all wait on James, not on an agent.
+    // and manual reminders all wait on the user, not on an agent.
     return { ...counts, needsYou: counts.needsYou + gatesApi.gates.length };
   }, [board.values.cards, agents, gatesApi.gates]);
   return (

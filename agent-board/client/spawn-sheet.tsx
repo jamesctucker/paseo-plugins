@@ -13,7 +13,7 @@ import {
 import type { PluginTheme } from "@getpaseo/plugin";
 import { usePaseo, useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
-import { issueGetRpc, spawnPathCheckRpc } from "../shared/contracts";
+import { githubGetRpc, issueGetRpc, linearGetRpc, spawnPathCheckRpc } from "../shared/contracts";
 import { jiraConfigDoc, linearConfigDoc, type BoardCard, type CardRun } from "../shared/settings";
 import { resolveSpawnSpec, spawnOptions, type ProviderCatalogEntry } from "../shared/provider";
 import { fullSeed, titleSeed } from "../shared/prompt";
@@ -245,6 +245,8 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
   const paseo = usePaseo();
   const toast = useToast();
   const getIssue = useRpc(issueGetRpc);
+  const getLinearIssue = useRpc(linearGetRpc);
+  const getGithubIssue = useRpc(githubGetRpc);
   const checkPath = useRpc(spawnPathCheckRpc);
   const config = useSettings(jiraConfigDoc);
   const linearConfig = useSettings(linearConfigDoc);
@@ -280,10 +282,21 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
       return;
     }
     setPrompt(titleSeed(card));
-    if (!card.jiraKey) return;
+    // All three trackers promise body enrichment; the fetch branches on the
+    // card's source so a Linear key never hits the Jira endpoint (and 404s
+    // into the silent catch).
+    const fetchDetail =
+      card.jiraKey && card.source === "linear"
+        ? getLinearIssue({ key: card.jiraKey })
+        : card.jiraKey
+          ? getIssue({ key: card.jiraKey })
+          : card.github
+            ? getGithubIssue({ key: `${card.github.repo}#${card.github.number}` })
+            : null;
+    if (!fetchDetail) return;
     const openedAt = Date.now();
     let cancelled = false;
-    getIssue({ key: card.jiraKey })
+    fetchDetail
       .then((issue) => {
         if (!cancelled && !editedRef.current && Date.now() - openedAt < 2000) setPrompt(fullSeed(card, issue));
       })
@@ -294,7 +307,7 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
       cancelled = true;
     };
     // Reseed per card and per open. The ref is read fresh at resolve time.
-  }, [open, card?.id, getIssue]);
+  }, [open, card?.id, getIssue, getLinearIssue, getGithubIssue]);
 
   useEffect(() => {
     if (!open) return;
@@ -371,8 +384,8 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
         ? (linearValues?.spawnProviderLinear ?? "") || fallback
         : fallback;
 
-  // Creative work is James's (ties-go-creative doctrine): unrouted counts as
-  // creative. The board warns; the judgment stays his — no hard block.
+  // Creative work is the user's (ties-go-creative doctrine): unrouted counts as
+  // creative. The board warns; the judgment stays the user's — no hard block.
   const needsCreativeConfirm = card.source === "linear" && card.route !== "rote";
 
   const spec = selectedSpec ?? provider;

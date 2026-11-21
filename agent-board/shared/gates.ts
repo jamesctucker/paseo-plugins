@@ -3,7 +3,7 @@ import { cardKey } from "./groups";
 
 /**
  * "Waiting on you" gates (brief amendment 2026-11-06): the standing list of
- * things only James can clear — chain stalls, archived-but-not-Done tracker
+ * things only the user can clear — chain stalls, archived-but-not-Done tracker
  * issues, GitHub review asks, and hand-written reminders. Gates are derived,
  * never stored (except manual ones and the Done-nag opt-out list): they
  * self-clear when the underlying tracker state moves, which is the whole
@@ -18,7 +18,7 @@ export interface FreshStatus {
   done: boolean;
 }
 
-/** One PR that needs James's review action. */
+/** One PR that needs the user's review action. */
 export interface PrGateRef {
   repo: string;
   number: number;

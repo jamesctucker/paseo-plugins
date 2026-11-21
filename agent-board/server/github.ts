@@ -40,7 +40,7 @@ interface GitHubReview {
   submitted_at?: string;
 }
 
-/** One PR that needs James's review action (amendment 2026-11-06). */
+/** One PR that needs the user's review action (amendment 2026-11-06). */
 export interface PrGateRef {
   repo: string;
   number: number;

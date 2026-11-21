@@ -135,13 +135,13 @@ describe("chain", () => {
     };
     const request = vi
       .fn()
-      .mockImplementationOnce(async () => gqlResponse({ issue: { project: { id: "p1", name: "Rolodex" } } }))
+      .mockImplementationOnce(async () => gqlResponse({ issue: { project: { id: "p1", name: "Website" } } }))
       .mockImplementationOnce(async () =>
         gqlResponse({ project: { issues: { nodes: [projectIssue, blockedIssue] } } }),
       );
     const adapter = createLinearAdapter(config, request as unknown as typeof fetch);
     const result = await adapter.chain("eng-2");
-    expect(result.projectName).toBe("Rolodex");
+    expect(result.projectName).toBe("Website");
     const eng2 = result.issues.find((issue) => issue.key === "ENG-2");
     expect(eng2).toMatchObject({ blockedBy: ["ENG-1"], route: "creative", done: false });
     const eng1 = result.issues.find((issue) => issue.key === "ENG-1");

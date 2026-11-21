@@ -26,9 +26,9 @@ describe("parseQuickAdd", () => {
   });
 
   it("parses task syntax under a tracker key", () => {
-    expect(parseQuickAdd("OPS-28506: fix the retry logic")).toEqual({
+    expect(parseQuickAdd("SUP-101: fix the retry logic")).toEqual({
       kind: "jira",
-      key: "OPS-28506",
+      key: "SUP-101",
       task: "fix the retry logic",
     });
     expect(parseQuickAdd("eng-5: review: the staging plan")).toEqual({
@@ -78,6 +78,6 @@ describe("manual gate syntax", () => {
   });
 
   it("gate text keeps colons", () => {
-    expect(parseQuickAdd("! tell Critchfield: F2 53→100")).toEqual({ kind: "gate", text: "tell Critchfield: F2 53→100" });
+    expect(parseQuickAdd("! tell the pharmacy: refill expires Friday")).toEqual({ kind: "gate", text: "tell the pharmacy: refill expires Friday" });
   });
 });

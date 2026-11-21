@@ -51,6 +51,9 @@ const EMPTY: GateData = {
 let cache: GateData = EMPTY;
 let inFlight: Promise<void> | null = null;
 let lastSignature = "";
+// Set when a signature change arrives while a fetch is already running; the
+// landing fetch hands it to the next effect pass instead of dropping it.
+let pendingSignature: string | null = null;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -115,7 +118,10 @@ export function useGates(board: BoardDoc): Gates {
   useEffect(() => {
     const stale = Date.now() - cache.fetchedAt > TTL;
     if (!stale && signature === lastSignature) return;
-    if (inFlight) return;
+    if (inFlight) {
+      pendingSignature = signature;
+      return;
+    }
     lastSignature = signature;
     inFlight = (async () => {
       const next: GateData = { ...EMPTY, fetchedAt: Date.now() };
@@ -161,11 +167,18 @@ export function useGates(board: BoardDoc): Gates {
       next.chains = [...projects.values()];
       cache = next;
       inFlight = null;
+      // A signature change queued mid-flight: forget the last-run signature so
+      // the pass this emit() triggers actually fetches the newer key set.
+      const rerun = pendingSignature != null && pendingSignature !== lastSignature;
+      pendingSignature = null;
+      if (rerun) lastSignature = "";
       emit();
     })();
-    // RPC identities are stable; the key sets ride the signature.
+    // The effect also rides `version`: invalidate() (foreground, host
+    // reconnect) bumps it through the listener set, and the signature it
+    // leaves behind differs from lastSignature, forcing the refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
+  }, [signature, version]);
 
   const gates = useMemo(
     () =>

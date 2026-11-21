@@ -50,13 +50,13 @@ describe("createJiraAdapter", () => {
   it("uses the assigned JQL from config and posts search/jql", async () => {
     const request = vi.fn(async () => jsonResponse({ issues: [] }));
     const adapter = createJiraAdapter(
-      { ...config, jql: "project = CC ORDER BY rank" },
+      { ...config, jql: "project = DEMO ORDER BY rank" },
       request as unknown as typeof fetch,
     );
     await adapter.listAssigned();
     const call = request.mock.calls[0] as unknown as [string, RequestInit];
     expect(call[0]).toContain("/rest/api/3/search/jql");
-    expect(JSON.parse(String(call[1].body)).jql).toBe("project = CC ORDER BY rank");
+    expect(JSON.parse(String(call[1].body)).jql).toBe("project = DEMO ORDER BY rank");
   });
 
   it("keeps finished work out of the default list", async () => {
@@ -108,10 +108,10 @@ describe("createJiraAdapter", () => {
     // exact lookup silently loses the issue and quick-add falls through.
     const request = vi.fn(async () => jsonResponse({ issues: [] }));
     const adapter = createJiraAdapter(config, request as unknown as typeof fetch);
-    await adapter.search("OPS-28506");
+    await adapter.search("SUP-101");
     const call = request.mock.calls[0] as unknown as [string, RequestInit];
     expect(call[0]).not.toContain("jql=");
-    expect(JSON.parse(String(call[1].body)).jql).toBe('key = "OPS-28506"');
+    expect(JSON.parse(String(call[1].body)).jql).toBe('key = "SUP-101"');
   });
 
   it("accepts a bare site name, a bare host, or a pasted URL as the domain", async () => {
