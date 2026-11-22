@@ -7,12 +7,19 @@ export const listRepos = defineRpc({
   output: z.object({
     repos: z.array(
       z.object({
-        /** Repo identity: path relative to its workspace root, e.g. "work/api". */
+        /** Unique identity: workspace id plus workspace-relative path. Paths
+         * alone collide across workspaces (every single-repo workspace lists
+         * "."), so selection and restore key on this instead. */
+        id: z.string(),
+        /** Path relative to its workspace root, e.g. "work/api" (or "." for
+         * a workspace that is itself a single repo). */
         path: z.string(),
         /** Display name: the repo directory's basename. */
         name: z.string(),
         /** Id of the workspace the repo lives under; the teacher runs there. */
         workspaceId: z.string(),
+        /** Workspace title, shown as row context when several workspaces are open. */
+        workspaceName: z.string(),
       }),
     ),
     last: z

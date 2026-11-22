@@ -434,12 +434,21 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
       // agent.create requires provider/model; resolve the effective spec
       // against the live catalog so a bare provider errors with the fix.
       const providerSpec = resolveSpawnSpec(spec, catalog ?? []);
+      // New workspaces otherwise take the host's default name (the checked
+      // out branch, "main" for a plain worktree), which says nothing about
+      // what is running there. Name them after the card; the agent carries
+      // the same title, so the pair reads as one unit in the sidebar.
+      const runTitle = card.jiraKey ?? card.title;
       const workspace =
         source.kind === "workspace"
           ? paseo.workspaces.ref(source.workspaceId)
           : source.kind === "directory"
-            ? await paseo.workspaces.create({ source: { kind: "directory", path: source.path } })
+            ? await paseo.workspaces.create({
+                title: runTitle,
+                source: { kind: "directory", path: source.path },
+              })
             : await paseo.workspaces.create({
+                title: runTitle,
                 source: {
                   kind: "worktree",
                   action: "checkout",
@@ -449,7 +458,7 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
       const agent = await workspace.agents.create({
         config: { provider: providerSpec, ...(thinkingOverride ? { thinkingOptionId: thinkingOverride } : {}) },
         prompt: firstMessage,
-        title: card.jiraKey ?? card.title,
+        title: runTitle,
       });
       onSpawned(card.id, {
         agentId: agent.id,

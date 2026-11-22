@@ -14,7 +14,13 @@ export async function handleListRepos(
   const result = await context.paseo.workspaces.list({});
   const repos = await discoverRepos(result.entries);
   return {
-    repos: repos.map(({ path: repoPath, name, workspaceId }) => ({ path: repoPath, name, workspaceId })),
+    repos: repos.map(({ id, path: repoPath, name, workspaceId, workspaceName }) => ({
+      id,
+      path: repoPath,
+      name,
+      workspaceId,
+      workspaceName,
+    })),
     last: await readPrefs(),
   };
 }

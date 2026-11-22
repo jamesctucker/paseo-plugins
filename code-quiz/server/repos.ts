@@ -3,11 +3,15 @@ import path from "node:path";
 
 /** A git repo found under an open workspace root. */
 export interface DiscoveredRepo {
+  /** Unique identity: workspace id plus workspace-relative path. */
+  id: string;
   /** Path relative to the workspace root, posix separators (e.g. "work/api"). */
   path: string;
   /** The repo directory's basename. */
   name: string;
   workspaceId: string;
+  /** The workspace's display title, for row context. */
+  workspaceName: string;
   /** Absolute path of the workspace root the repo was found under. */
   workspaceDirectory: string;
 }
@@ -15,6 +19,7 @@ export interface DiscoveredRepo {
 export interface WorkspaceListEntry {
   id?: string;
   title?: string | null;
+  name?: string | null;
   workspaceDirectory?: string | null;
   projectRootPath?: string | null;
 }
@@ -63,7 +68,13 @@ async function isRepo(dir: string): Promise<boolean> {
 export async function discoverRepos(entries: WorkspaceListEntry[]): Promise<DiscoveredRepo[]> {
   const found = new Map<string, DiscoveredRepo>();
 
-  async function walk(workspaceId: string, root: string, dir: string, depth: number): Promise<void> {
+  async function walk(
+    workspaceId: string,
+    workspaceName: string,
+    root: string,
+    dir: string,
+    depth: number,
+  ): Promise<void> {
     let stat;
     try {
       stat = await fs.stat(dir);
@@ -78,9 +89,11 @@ export async function discoverRepos(entries: WorkspaceListEntry[]): Promise<Disc
       const repoPath = relative === "" ? "." : relative;
       if (!found.has(dir)) {
         found.set(dir, {
+          id: `${workspaceId}::${repoPath}`,
           path: repoPath,
           name: path.basename(dir),
           workspaceId,
+          workspaceName,
           workspaceDirectory: root,
         });
       }
@@ -98,7 +111,7 @@ export async function discoverRepos(entries: WorkspaceListEntry[]): Promise<Disc
       // escaping through a link planted inside the workspace.
       if (!entry.isDirectory()) continue;
       if (entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
-      pending.push(walk(workspaceId, root, path.join(dir, entry.name), depth + 1));
+      pending.push(walk(workspaceId, workspaceName, root, path.join(dir, entry.name), depth + 1));
     }
     await Promise.all(pending);
   }
@@ -107,7 +120,8 @@ export async function discoverRepos(entries: WorkspaceListEntry[]): Promise<Disc
   for (const entry of entries) {
     const root = entry.workspaceDirectory ?? entry.projectRootPath;
     if (!root || !entry.id) continue;
-    pending.push(walk(entry.id, root, root, 0));
+    const workspaceName = entry.title ?? entry.name ?? "";
+    pending.push(walk(entry.id, workspaceName, root, root, 0));
   }
   await Promise.all(pending);
   return [...found.values()].sort((a, b) => a.path.localeCompare(b.path));

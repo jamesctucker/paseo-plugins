@@ -66,10 +66,23 @@ describe("discoverRepos", () => {
 
   it("lists the same physical repo once across overlapping workspaces", async () => {
     const repos = await discoverRepos([
-      { id: "ws-1", workspaceDirectory: root },
-      { id: "ws-2", workspaceDirectory: root },
+      { id: "ws-1", title: "One", workspaceDirectory: root },
+      { id: "ws-2", title: "Two", workspaceDirectory: root },
     ]);
     expect(repos.filter((repo) => repo.path === "work/api")).toHaveLength(1);
+  });
+
+  it("gives the same path in two workspaces distinct ids", async () => {
+    const other = await makeWorkspace(["work/api/.git"]);
+    roots.push(other);
+    const repos = await discoverRepos([
+      { id: "ws-1", title: "One", workspaceDirectory: root },
+      { id: "ws-2", title: "Two", workspaceDirectory: other },
+    ]);
+    const pair = repos.filter((repo) => repo.path === "work/api");
+    expect(pair).toHaveLength(2);
+    expect(new Set(pair.map((repo) => repo.id)).size).toBe(2);
+    expect(pair.map((repo) => repo.workspaceName).sort()).toEqual(["One", "Two"]);
   });
 
   it("skips roots that do not exist", async () => {

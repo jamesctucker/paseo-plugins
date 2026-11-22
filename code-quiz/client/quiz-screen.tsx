@@ -30,7 +30,11 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
   );
 
   const repos = reposQuery.data?.repos ?? [];
-  const focuses = getFocusesForRepo(repos.find((repo) => repo.path === selected)?.name ?? null);
+  // Selection keys on the repo's unique id: paths collide across workspaces
+  // (every single-repo workspace lists "."), and a path-keyed lookup could
+  // launch the teacher in a workspace the user never tapped.
+  const selectedRepo = repos.find((repo) => repo.id === selected) ?? null;
+  const focuses = getFocusesForRepo(selectedRepo?.name ?? null);
   // Custom text wins over a chip: typing is the stronger signal of intent.
   // Neither input destroys the other — the summary line shows which one applies.
   const trimmedTopic = topic.trim();
@@ -44,7 +48,8 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
     if (!data?.last || restored.current) return;
     restored.current = true;
     if (data.repos.some((repo) => repo.path === data.last?.repo)) {
-      setSelected(data.last.repo);
+      const match = data.repos.find((repo) => repo.path === data.last?.repo);
+      if (match) setSelected(match.id);
       if (data.last.focusId) setFocusId(data.last.focusId);
       if (data.last.topic) setTopic(data.last.topic);
     }
@@ -53,14 +58,13 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
   // Cancel releases the UI immediately; if the launch RPC lands anyway, the
   // orphaned teacher agent is archived so a cancel never strands a session.
   const cancelled = useRef(false);
-  const selectedRepo = repos.find((repo) => repo.path === selected) ?? null;
   const mutation = useMutation({
-    mutationFn: (repoPath: string) => {
-      const repo = repos.find((candidate) => candidate.path === repoPath);
+    mutationFn: (repoId: string) => {
+      const repo = repos.find((candidate) => candidate.id === repoId);
       if (!repo) throw new Error("Pick a repo first.");
       return launch({
         workspaceId: repo.workspaceId,
-        repoPath,
+        repoPath: repo.path,
         focusId: selectedFocus?.id,
         topic: trimmedTopic ? trimmedTopic : undefined,
       });
@@ -132,6 +136,7 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
       },
       repoName: { color: theme.colors.foreground, fontSize: 15 },
       repoNameSelected: { fontWeight: "600" as const },
+      repoWorkspace: { color: theme.colors.foregroundMuted, fontSize: 12, marginTop: 2 },
       chipRow: {
         flexDirection: "row" as const,
         flexWrap: "wrap" as const,
@@ -236,24 +241,29 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
             <Pressable
               key={repo.name}
               accessibilityRole="radio"
-              accessibilityState={{ selected: selected === repo.name }}
-              accessibilityLabel={`Select repo ${repo.name}`}
+              accessibilityState={{ selected: selected === repo.id }}
+              accessibilityLabel={`Select repo ${repo.path}${repo.workspaceName ? ` in ${repo.workspaceName}` : ""}`}
               onPress={() => {
-                setSelected(repo.path);
+                setSelected(repo.id);
                 setFocusId(null);
                 // The success beat belongs to the launch that produced it; a
                 // fresh pick re-arms the button in case the screen stayed
                 // mounted through the navigation.
                 setLaunched(false);
               }}
-              style={[styles.repoRow, selected === repo.path ? styles.repoRowSelected : null]}
+              style={[styles.repoRow, selected === repo.id ? styles.repoRowSelected : null]}
             >
               <Text
                 numberOfLines={1}
-                style={[styles.repoName, selected === repo.path ? styles.repoNameSelected : null]}
+                style={[styles.repoName, selected === repo.id ? styles.repoNameSelected : null]}
               >
                 {repo.path}
               </Text>
+              {repo.workspaceName ? (
+                <Text numberOfLines={1} style={styles.repoWorkspace}>
+                  {repo.workspaceName}
+                </Text>
+              ) : null}
             </Pressable>
           ))}
         </View>
@@ -306,9 +316,9 @@ export function QuizScreen({ theme, layout, navigation }: PluginScreenProps) {
         />
       </View>
 
-      {selected ? (
+      {selectedRepo ? (
         <Text style={styles.summary}>
-          {`Quiz: ${selected} — ${
+          {`Quiz: ${selectedRepo.path} — ${
             trimmedTopic
               ? `"${trimmedTopic}"${selectedFocus ? ` (overrides the ${selectedFocus.label} chip)` : ""}`
               : (selectedFocus?.label ?? "a general tour")
