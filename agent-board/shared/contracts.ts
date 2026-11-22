@@ -177,6 +177,20 @@ export const githubReviewGatesRpc = defineRpc({
 });
 
 /**
+ * Resolve the local clone a PR worktree should be built from. The daemon
+ * checks out the worktree in that clone, so the PR's own repository is the
+ * one being reviewed.
+ */
+export const prCheckoutRpc = defineRpc({
+  name: "github.pr-checkout",
+  input: z.object({
+    repo: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]+\/[A-Za-z0-9][A-Za-z0-9._-]+$/),
+    number: z.number().int().positive(),
+  }),
+  output: z.object({ path: z.string().nullable() }),
+});
+
+/**
  * Stopping a run from the board. The SDK has no cancel, so the server shells
  * to the daemon's CLI (better-paseo's approach); `board.capabilities` lets
  * the client hide the stop control when no CLI is reachable.

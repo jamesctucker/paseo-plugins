@@ -13,7 +13,7 @@ import {
 import type { PluginTheme } from "@getpaseo/plugin";
 import { usePaseo, useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/ui";
-import { githubGetRpc, issueGetRpc, linearGetRpc, spawnPathCheckRpc } from "../shared/contracts";
+import { githubGetRpc, issueGetRpc, linearGetRpc, prCheckoutRpc, spawnPathCheckRpc } from "../shared/contracts";
 import { jiraConfigDoc, linearConfigDoc, type BoardCard, type CardRun } from "../shared/settings";
 import { resolveSpawnSpec, spawnOptions, type ProviderCatalogEntry } from "../shared/provider";
 import { fullSeed, titleSeed } from "../shared/prompt";
@@ -49,7 +49,9 @@ interface WorkspaceLite {
 type SpawnSource =
   | { kind: "workspace"; workspaceId: string }
   | { kind: "directory"; path: string }
-  | { kind: "worktree"; number: number };
+  | { kind: "worktree"; repo: string; number: number }
+  /** A fresh run workspace: a new branch-off worktree titled after the card. */
+  | { kind: "run" };
 
 type SheetView = "form" | "workspace" | "model" | "thinking";
 
@@ -247,6 +249,7 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
   const getIssue = useRpc(issueGetRpc);
   const getLinearIssue = useRpc(linearGetRpc);
   const getGithubIssue = useRpc(githubGetRpc);
+  const prCheckout = useRpc(prCheckoutRpc);
   const checkPath = useRpc(spawnPathCheckRpc);
   const config = useSettings(jiraConfigDoc);
   const linearConfig = useSettings(linearConfigDoc);
@@ -338,15 +341,14 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
         setTarget((current) => {
           if (current) return current;
           // A card with runs continues its own thread: default to the
-          // workspace of its latest run, not whatever workspace was last
-          // active elsewhere (which once landed a run in an unrelated chat).
-          // Falls through to the most recent workspace when that one is
-          // archived or the card has never run.
+          // workspace of its latest run. Every other card starts fresh — a new
+          // run workspace titled after the card — so a run never silently
+          // lands in whatever workspace was last active elsewhere.
           const lastRun = card?.runs[card.runs.length - 1];
           if (lastRun && active.some((workspace) => workspace.id === lastRun.workspaceId)) {
             return { kind: "workspace", workspaceId: lastRun.workspaceId };
           }
-          return active[0] ? { kind: "workspace", workspaceId: active[0].id } : null;
+          return { kind: "run" };
         });
       })
       .catch(() => {
@@ -382,6 +384,10 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
   }, [paseo, open, card?.id]);
 
   if (!card) return null;
+
+  // Every workspace this run creates carries the card's name, so the sidebar
+  // pair (workspace + agent) reads as one unit.
+  const runTitle = card.jiraKey ?? card.title;
 
   // Spawn lanes (amendment decision 8): the card's tracker picks the lane,
   // silently — work stays on the work model, personal stays off it. Read per
@@ -432,8 +438,10 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
       : target?.kind === "directory"
         ? { value: target.path.split("/").filter(Boolean).pop() ?? target.path, detail: `New workspace at ${middleTruncate(target.path, 36)}` }
         : target?.kind === "worktree"
-          ? { value: `New worktree, PR #${target.number}`, detail: "Checks out the pull request" }
-          : workspacesLoaded
+          ? { value: `New worktree, PR #${target.number}`, detail: `Checks out ${target.repo}#${target.number}` }
+          : target?.kind === "run"
+            ? { value: "New workspace", detail: `Titled "${middleTruncate(runTitle, 36)}"` }
+            : workspacesLoaded
             ? { value: "Choose a workspace", detail: "No recent workspaces yet" }
             : { value: "Loading workspaces…", detail: "" };
 
@@ -446,11 +454,6 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
       // agent.create requires provider/model; resolve the effective spec
       // against the live catalog so a bare provider errors with the fix.
       const providerSpec = resolveSpawnSpec(spec, catalog ?? []);
-      // New workspaces otherwise take the host's default name (the checked
-      // out branch, "main" for a plain worktree), which says nothing about
-      // what is running there. Name them after the card; the agent carries
-      // the same title, so the pair reads as one unit in the sidebar.
-      const runTitle = card.jiraKey ?? card.title;
       const workspace =
         source.kind === "workspace"
           ? paseo.workspaces.ref(source.workspaceId)
@@ -459,14 +462,35 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
                 title: runTitle,
                 source: { kind: "directory", path: source.path },
               })
-            : await paseo.workspaces.create({
-                title: runTitle,
-                source: {
-                  kind: "worktree",
-                  action: "checkout",
-                  checkoutSource: { kind: "change_request", forge: "github", number: source.number },
-                },
-              });
+            : source.kind === "run"
+              ? await paseo.workspaces.create({
+                  title: runTitle,
+                  // Branch-off of the daemon's ambient repo: a fresh, isolated
+                  // workspace per card without the caller naming a source repo.
+                  source: { kind: "worktree", action: "branch-off" },
+                })
+              : await (async () => {
+                  // A PR worktree must be built from the PR's own repository,
+                  // resolved the same way review-queue does: find the local
+                  // clone among open workspaces and verify its git origin.
+                  // Without a cwd the daemon branches off whatever repo is
+                  // ambient — the wrong code, silently.
+                  const { path: cwd } = await prCheckout({ repo: source.repo, number: source.number });
+                  if (!cwd) {
+                    throw new Error(
+                      `No local checkout of ${source.repo} under your open workspaces — clone it, or pick another source.`,
+                    );
+                  }
+                  return paseo.workspaces.create({
+                    title: runTitle,
+                    source: {
+                      kind: "worktree",
+                      cwd,
+                      action: "checkout",
+                      checkoutSource: { kind: "change_request", forge: "github", number: source.number },
+                    },
+                  });
+                })();
       const agent = await workspace.agents.create({
         config: { provider: providerSpec, ...(thinkingOverride ? { thinkingOptionId: thinkingOverride } : {}) },
         prompt: firstMessage,
@@ -551,13 +575,23 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
       }}
       footer={
         <View style={{ gap: 2, borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 10 }}>
+          <OptionRow
+            theme={theme}
+            icon="Plus"
+            title="New workspace for this card"
+            detail={`Titled "${middleTruncate(runTitle, 36)}"`}
+            selected={target?.kind === "run"}
+            onPress={() => chooseTarget({ kind: "run" })}
+          />
           {card.github ? (
             <OptionRow
               theme={theme}
               icon="GitPullRequest"
               title={`New worktree, checkout PR #${card.github.number}`}
               selected={target?.kind === "worktree"}
-              onPress={() => chooseTarget({ kind: "worktree", number: card.github!.number })}
+              onPress={() =>
+                chooseTarget({ kind: "worktree", repo: card.github!.repo, number: card.github!.number })
+              }
             />
           ) : null}
           {pathEntryOpen ? (

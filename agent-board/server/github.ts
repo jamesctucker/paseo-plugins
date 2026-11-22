@@ -1,4 +1,10 @@
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { promisify } from "node:util";
 import type { IssueAdapter, IssueDetail, IssueSummary } from "../shared/tracker";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * GitHub REST adapter for pull requests. Tokens and network stay daemon-side;
@@ -256,4 +262,45 @@ export function createGitHubAdapter(
       };
     },
   };
+}
+
+/** Pull "owner/name" out of a git remote URL, any of the common shapes. */
+export function parseOriginRepo(remoteUrl: string): string | null {
+  const match = /[:/]([^/:]+)\/([^/]+?)(?:\.git)?\s*$/.exec(remoteUrl.trim());
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
+async function originRepo(checkoutPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", checkoutPath, "remote", "get-url", "origin"], {
+      timeout: 5_000,
+    });
+    return parseOriginRepo(stdout);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Find a local clone of a PR's repo among the host's open workspaces.
+ * Candidates are the repo-named sibling under each workspace's work/
+ * directory (plus a workspace that itself is the checkout). The checkout's
+ * origin must actually point at the PR's repo: two repos can share a name
+ * under different owners, and a worktree built from the wrong one reviews
+ * the wrong code. GitHub compares owner/name case-insensitively.
+ */
+export async function resolvePrCheckout(repo: string, roots: string[]): Promise<string | null> {
+  const name = repo.split("/")[1] ?? "";
+  if (!name) return null;
+  const seen = new Set<string>();
+  for (const root of roots) {
+    for (const candidate of [path.join(root, "work", name), root]) {
+      if (candidate !== root && path.basename(candidate) !== name) continue;
+      if (seen.has(candidate) || !existsSync(candidate)) continue;
+      seen.add(candidate);
+      const origin = await originRepo(candidate);
+      if (origin && origin.toLowerCase() === repo.toLowerCase()) return candidate;
+    }
+  }
+  return null;
 }

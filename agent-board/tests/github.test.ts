@@ -1,5 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
-import { createGitHubAdapter, GitHubApiError } from "../server/github";
+import { execFile } from "node:child_process";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { createGitHubAdapter, GitHubApiError, parseOriginRepo, resolvePrCheckout } from "../server/github";
+
+const execFileAsync = promisify(execFile);
 
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return {
@@ -183,5 +190,64 @@ describe("reviewGates", () => {
     const adapter = createGitHubAdapter(config, request as unknown as typeof fetch);
     const items = await adapter.listAssigned();
     expect(items.map((item) => item.identifier)).toContain("acme/api#2");
+  });
+});
+
+describe("resolvePrCheckout", () => {
+  it("finds a work/ clone whose origin matches the PR repo", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "ab-root-"));
+    try {
+      const api = path.join(root, "work", "api");
+      await fs.mkdir(api, { recursive: true });
+      await execFileAsync("git", ["-C", api, "init", "--quiet"]);
+      await execFileAsync("git", ["-C", api, "remote", "add", "origin", "https://github.com/acme/api.git"]);
+      const found = await resolvePrCheckout("acme/api", [root]);
+      expect(found).toBe(api);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a same-named clone of a different owner", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "ab-root-"));
+    try {
+      const api = path.join(root, "work", "api");
+      await fs.mkdir(api, { recursive: true });
+      await execFileAsync("git", ["-C", api, "init", "--quiet"]);
+      await execFileAsync("git", ["-C", api, "remote", "add", "origin", "git@github.com:other/api.git"]);
+      expect(await resolvePrCheckout("acme/api", [root])).toBeNull();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("compares owner and name case-insensitively", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "ab-root-"));
+    try {
+      const api = path.join(root, "work", "api");
+      await fs.mkdir(api, { recursive: true });
+      await execFileAsync("git", ["-C", api, "init", "--quiet"]);
+      await execFileAsync("git", ["-C", api, "remote", "add", "origin", "https://github.com/ACME/API.git"]);
+      expect(await resolvePrCheckout("acme/api", [root])).toBe(api);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null when no clone exists", async () => {
+    expect(await resolvePrCheckout("acme/api", [])).toBeNull();
+  });
+});
+
+describe("parseOriginRepo", () => {
+  it("reads https and ssh remote urls", () => {
+    expect(parseOriginRepo("https://github.com/acme/api.git")).toBe("acme/api");
+    expect(parseOriginRepo("git@github.com:acme/api.git")).toBe("acme/api");
+    expect(parseOriginRepo("ssh://git@github.com/acme/api.git")).toBe("acme/api");
+  });
+
+  it("returns null for remotes with no owner/name pair", () => {
+    expect(parseOriginRepo("https://github.com")).toBeNull();
+    expect(parseOriginRepo("")).toBeNull();
   });
 });

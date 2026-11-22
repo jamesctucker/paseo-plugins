@@ -20,10 +20,11 @@ import {
   linearListRpc,
   linearSearchRpc,
   linearStatusesRpc,
+  prCheckoutRpc,
   spawnPathCheckRpc,
 } from "../shared/contracts";
 import { createJiraAdapter, type JiraAdapter } from "./jira";
-import { createGitHubAdapter, type GitHubAdapter } from "./github";
+import { createGitHubAdapter, type GitHubAdapter, resolvePrCheckout } from "./github";
 import { createLinearAdapter, type LinearAdapter } from "./linear";
 import { resolveCli, stopAgent } from "./stop";
 
@@ -98,6 +99,22 @@ export function createHandlers(
 
       async reviewGates(_input: RpcInput<typeof githubReviewGatesRpc>) {
         return (await github()).reviewGates();
+      },
+
+      async prCheckout(
+        { repo }: RpcInput<typeof prCheckoutRpc>,
+        context: PluginHandlerContext,
+      ) {
+        let roots: string[] = [];
+        try {
+          const result = await context.paseo.workspaces.list({});
+          roots = result.entries
+            .map((entry) => entry.workspaceDirectory ?? entry.projectRootPath)
+            .filter((root: string | undefined | null): root is string => Boolean(root));
+        } catch {
+          // No roots means no checkout; the null answer below says so.
+        }
+        return { path: await resolvePrCheckout(repo, roots) };
       },
     },
 

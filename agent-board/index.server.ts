@@ -16,6 +16,7 @@ import {
   linearListRpc,
   linearSearchRpc,
   linearStatusesRpc,
+  prCheckoutRpc,
   spawnPathCheckRpc,
 } from "./shared/contracts";
 import { createHandlers, settingsStore } from "./server/handlers";
@@ -35,6 +36,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(githubListRpc, handlers.github.list);
   server.handle(githubGetRpc, handlers.github.get);
   server.handle(githubReviewGatesRpc, handlers.github.reviewGates);
+  server.handle(prCheckoutRpc, handlers.github.prCheckout);
   server.handle(linearSearchRpc, handlers.linear.search);
   server.handle(linearListRpc, handlers.linear.list);
   server.handle(linearGetRpc, handlers.linear.get);
