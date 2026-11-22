@@ -335,7 +335,19 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
         active.sort((a, b) => (a.activityAt < b.activityAt ? 1 : -1));
         setWorkspaces(active);
         setWorkspacesLoaded(true);
-        setTarget((current) => current ?? (active[0] ? { kind: "workspace", workspaceId: active[0].id } : null));
+        setTarget((current) => {
+          if (current) return current;
+          // A card with runs continues its own thread: default to the
+          // workspace of its latest run, not whatever workspace was last
+          // active elsewhere (which once landed a run in an unrelated chat).
+          // Falls through to the most recent workspace when that one is
+          // archived or the card has never run.
+          const lastRun = card?.runs[card.runs.length - 1];
+          if (lastRun && active.some((workspace) => workspace.id === lastRun.workspaceId)) {
+            return { kind: "workspace", workspaceId: lastRun.workspaceId };
+          }
+          return active[0] ? { kind: "workspace", workspaceId: active[0].id } : null;
+        });
       })
       .catch(() => {
         if (!cancelled) {
