@@ -388,6 +388,8 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
   // Every workspace this run creates carries the card's name, so the sidebar
   // pair (workspace + agent) reads as one unit.
   const runTitle = card.jiraKey ?? card.title;
+  // The branch base a fresh run workspace would use (most recently active).
+  const runBase = workspaces[0]?.directory ?? null;
 
   // Spawn lanes (amendment decision 8): the card's tracker picks the lane,
   // silently — work stays on the work model, personal stays off it. Read per
@@ -440,7 +442,10 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
         : target?.kind === "worktree"
           ? { value: `New worktree, PR #${target.number}`, detail: `Checks out ${target.repo}#${target.number}` }
           : target?.kind === "run"
-            ? { value: "New workspace", detail: `Titled "${middleTruncate(runTitle, 36)}"` }
+            ? {
+                value: "New workspace",
+                detail: `Titled "${middleTruncate(runTitle, 36)}"${runBase ? ` · from ${middleTruncate(runBase, 28)}` : ""}`,
+              }
             : workspacesLoaded
             ? { value: "Choose a workspace", detail: "No recent workspaces yet" }
             : { value: "Loading workspaces…", detail: "" };
@@ -463,12 +468,19 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
                 source: { kind: "directory", path: source.path },
               })
             : source.kind === "run"
-              ? await paseo.workspaces.create({
-                  title: runTitle,
-                  // Branch-off of the daemon's ambient repo: a fresh, isolated
-                  // workspace per card without the caller naming a source repo.
-                  source: { kind: "worktree", action: "branch-off" },
-                })
+              ? await (async () => {
+                  // Branch off the most recently active workspace's repo: a
+                  // fresh, isolated worktree per card, named after the card.
+                  // The daemon requires an explicit cwd for a worktree, and
+                  // "where you were last working" is the best default base —
+                  // the picker offers every other source when it is not.
+                  const base = workspaces[0]?.directory;
+                  if (!base) throw new Error("No workspace to branch from — pick a source in the picker.");
+                  return paseo.workspaces.create({
+                    title: runTitle,
+                    source: { kind: "worktree", cwd: base, action: "branch-off" },
+                  });
+                })()
               : await (async () => {
                   // A PR worktree must be built from the PR's own repository,
                   // resolved the same way review-queue does: find the local
@@ -579,7 +591,7 @@ export function SpawnSheet({ theme, card, open, onOpenChange, onSpawned, onOpenA
             theme={theme}
             icon="Plus"
             title="New workspace for this card"
-            detail={`Titled "${middleTruncate(runTitle, 36)}"`}
+            detail={`Titled "${middleTruncate(runTitle, 36)}"${runBase ? ` · from ${middleTruncate(runBase, 28)}` : ""}`}
             selected={target?.kind === "run"}
             onPress={() => chooseTarget({ kind: "run" })}
           />
