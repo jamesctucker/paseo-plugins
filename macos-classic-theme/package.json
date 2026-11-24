@@ -1,7 +1,7 @@
 {
   "name": "macos-classic-theme",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "0.15.0",
+    "@getpaseo/plugin": "0.16.2",
     "@tanstack/react-query": "^5.90.11",
     "@types/react": "~19.2.0",
     "react": "19.1.0",
@@ -23,6 +23,6 @@
     "typescript": "^5.9.3",
     "zod": "^4.4.3"
   },
-  "description": "macOS Classic light and dark themes for Paseo, ported from the Zed theme by huacnlee.",
+  "description": "macOS themes for Paseo: a macOS Classic pair ported from the Zed theme by huacnlee, and a Tahoe pair with the lighter, cooler chrome of current macOS.",
   "license": "MIT"
 }
