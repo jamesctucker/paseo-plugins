@@ -44,8 +44,8 @@ export const BoardCardSchema = z.object({
     })
     .optional(),
   /**
-   * The card's day, `YYYY-MM-DD`. Null is the inbox (amendment 2026-11-20):
-   * captured but not yet placed, so it stays out of every dated surface.
+   * The card's day, `YYYY-MM-DD`. Null is the backlog (amendment 2026-11-20):
+   * captured but not yet placed on a day, in any week.
    */
   day: z.string().nullable(),
   createdAt: z.string(),
@@ -56,11 +56,11 @@ export const BoardCardSchema = z.object({
 export const boardDoc = defineSettings({
   id: "board",
   scope: "host",
-  version: 8,
+  version: 9,
   schema: z.object({
     cards: z.array(BoardCardSchema).default([]),
-    /** Day the migration prompt was last answered, so it asks once per day. */
-    migrationAnsweredDay: z.string().default(""),
+    /** Monday of the week the rollover prompt was last answered, so it asks once a week. */
+    rolloverAnsweredWeek: z.string().default(""),
     /**
      * Issue-keyed memos (see shared/notes.ts): the note belongs to the issue
      * or PR, not the ephemeral card, so it returns when the issue returns.
@@ -88,19 +88,22 @@ export const boardDoc = defineSettings({
   // v2 added dismissedAttention, v3 added the linear card source, v4 added
   // issueTitle, v5 added gates storage + the card route, v6 added
   // declinedLinks, v7 added cardNotes, v8 made day nullable (the inbox's
-  // undated state — every stored day is a string, so there is no backfill).
-  // Additive fields ride schema defaults; the only backfill is v4's
-  // issueTitle, since every pre-v4 tracker card was a whole-issue task whose
-  // title is the issue's.
+  // undated state — every stored day is a string, so there is no backfill),
+  // v9 traded the daily migration stamp for the weekly rollover stamp. All
+  // but the v4 backfill ride schema defaults: every pre-v4 tracker card was
+  // a whole-issue task whose title is the issue's.
   migrate: (values, fromVersion) => {
-    if (fromVersion >= 6) return values;
-    if (fromVersion >= 4) return { ...((values ?? {}) as Record<string, unknown>), manualGates: {}, clearedDoneNags: {} };
-    const stored = (values ?? {}) as { cards?: (Record<string, unknown> & { title?: string; issueTitle?: string; jiraKey?: string; github?: unknown })[] };
+    if (fromVersion >= 9) return values;
+    const stored = { ...((values ?? {}) as Record<string, unknown>) };
+    delete stored.migrationAnsweredDay;
+    if (fromVersion >= 6) return stored;
+    if (fromVersion >= 4) return { ...stored, manualGates: {}, clearedDoneNags: {} };
+    const doc = stored as { cards?: (Record<string, unknown> & { title?: string; issueTitle?: string; jiraKey?: string; github?: unknown })[] };
     return {
-      ...stored,
+      ...doc,
       manualGates: {},
       clearedDoneNags: {},
-      cards: (stored.cards ?? []).map((card) =>
+      cards: (doc.cards ?? []).map((card) =>
         card.issueTitle === undefined && (card.jiraKey || card.github) && card.title
           ? { ...card, issueTitle: card.title }
           : card,

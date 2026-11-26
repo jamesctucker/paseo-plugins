@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGroups, insertAtGroupEnd, isDuplicate, placeCard, showHeader, siblingTaskCard, taskDisplayTitle } from "../shared/groups";
+import { buildGroups, insertAtGroupEnd, isDuplicate, neighborIndex, placeCard, showHeader, siblingTaskCard, taskDisplayTitle } from "../shared/groups";
 import type { BoardCard } from "../shared/settings";
 
 function card(id: string, partial: Partial<BoardCard> = {}): BoardCard {
@@ -128,9 +128,10 @@ describe("insertAtGroupEnd", () => {
   });
 });
 
-describe("placeCard", () => {
-  const visible = (cards: BoardCard[]) => buildGroups(cards.filter((c) => !c.archivedAt)).flatMap((g) => g.cards);
+/** The rows a column shows: live cards, grouped, flattened back to one list. */
+const visible = (cards: BoardCard[]) => buildGroups(cards.filter((c) => !c.archivedAt)).flatMap((g) => g.cards);
 
+describe("placeCard", () => {
   it("reorders a task within its own group without moving siblings out", () => {
     const cards = [projCard("a", "one"), projCard("b", "two"), projCard("c", "three"), card("p", { source: "prompt" })];
     const rows = visible(cards);
@@ -160,5 +161,71 @@ describe("placeCard", () => {
     const rows = visible(cards);
     const next = placeCard(cards, rows, "a", rows.findIndex((r) => r.id === "a"));
     expect(next.map((c) => c.id)).toEqual(["a", "p"]);
+  });
+
+  it("moves only the rows the list shows when a group also holds cards elsewhere", () => {
+    // Tuesday's "two" is the same issue but not part of Monday's list.
+    const cards = [projCard("a", "one"), card("z"), { ...projCard("b", "two"), day: "2026-11-06" }];
+    const rows = visible(cards.filter((c) => c.day === "2026-11-05"));
+    const next = placeCard(cards, rows, "a", rows.findIndex((r) => r.id === "z"));
+    expect(next.map((c) => c.id)).toEqual(["a", "z", "b"]);
+  });
+
+  it("anchors on the target group's rows in this list, not where the group starts", () => {
+    // The target's issue starts in the backlog; Monday holds a later task
+    // of it. Anchoring globally would drop the unit before the backlog row,
+    // leaving the visible column unchanged.
+    const monday = "2026-11-09";
+    const ops = (id: string, key: string, day: string | null) =>
+      card(id, { title: id, jiraKey: key, issueTitle: `Issue ${key}`, jiraStatus: "In Progress", day });
+    const cards = [ops("b", "OPS-1", null), ops("m", "OPS-2", monday), ops("c", "OPS-1", monday)];
+    const rows = visible(cards.filter((card) => card.day === monday)); // m, c
+    const next = placeCard(cards, rows, "m", rows.findIndex((r) => r.id === "c"));
+    expect(next.map((card) => card.id)).toEqual(["b", "m", "c"]);
+    expect(next[1].day).toBe(monday);
+  });
+});
+
+describe("neighborIndex", () => {
+  const rows = (cards: BoardCard[]) => visible(cards);
+
+  it("steps a card up by anchoring on the row above", () => {
+    const cards = [card("p"), card("q"), card("r")];
+    expect(neighborIndex(rows(cards), "q", -1)).toBe(0);
+  });
+
+  it("steps down by skipping the next row, since placement anchors before its target", () => {
+    const cards = [card("p"), card("q"), card("r")];
+    expect(neighborIndex(rows(cards), "p", 1)).toBe(2);
+    const next = placeCard(cards, rows(cards), "p", 2);
+    expect(next.map((c) => c.id)).toEqual(["q", "p", "r"]);
+  });
+
+  it("reads the list's end as the last step down", () => {
+    const cards = [card("p"), card("q")];
+    expect(neighborIndex(rows(cards), "p", 1)).toBe(2);
+    const next = placeCard(cards, rows(cards), "p", 2);
+    expect(next.map((c) => c.id)).toEqual(["q", "p"]);
+  });
+
+  it("refuses to walk past either edge", () => {
+    const cards = [card("p"), card("q")];
+    expect(neighborIndex(rows(cards), "p", -1)).toBe(-1);
+    expect(neighborIndex(rows(cards), "q", 1)).toBe(3);
+    expect(neighborIndex(rows(cards), "missing", 1)).toBe(-1);
+  });
+
+  it("steps a whole group over the next card as a unit", () => {
+    const cards = [projCard("a", "one"), projCard("b", "two"), card("p")];
+    expect(neighborIndex(rows(cards), "a", 1)).toBe(3);
+    expect(neighborIndex(rows(cards), "a", -1)).toBe(-1);
+    expect(neighborIndex(rows(cards), "b", -1)).toBe(0);
+  });
+
+  it("reorders inside a group without dragging siblings", () => {
+    const cards = [projCard("a", "one"), projCard("b", "two"), projCard("c", "three")];
+    expect(neighborIndex(rows(cards), "b", -1)).toBe(0);
+    const next = placeCard(cards, rows(cards), "b", 0);
+    expect(next.map((c) => c.id)).toEqual(["b", "a", "c"]);
   });
 });

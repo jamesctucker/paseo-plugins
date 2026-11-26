@@ -105,7 +105,7 @@ export default function contribute(client: PluginClientContext) {
     title: "Open Agent Board",
     icon: BOARD_ICON,
     context: "global",
-    keywords: ["board", "today", "jira"],
+    keywords: ["board", "week", "backlog", "jira"],
     onSelect() {
       openBoard();
     },

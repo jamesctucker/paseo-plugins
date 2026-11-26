@@ -1,6 +1,7 @@
 /**
- * Local-day helpers and the morning carry-over ritual. Pure string dates so the
- * logic stays testable without a clock; callers pass `new Date()` in prod.
+ * Local-day and elapsed-time helpers. Pure string dates so the logic stays
+ * testable without a clock; callers pass `new Date()` in prod. Week
+ * placement itself lives in shared/week.ts.
  */
 
 export function localDay(date: Date): string {
@@ -8,58 +9,6 @@ export function localDay(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
-}
-
-export const DONE_WINDOW_DAYS = 7;
-
-export interface DatedCard {
-  /** Null is the inbox: undated, so it is never stale, carried, or dropped. */
-  day: string | null;
-  archivedAt: string | null;
-}
-
-/** Unarchived dated cards from before today: the set the migration prompt offers. Inbox cards are never stale. */
-export function staleCards<T extends DatedCard>(cards: readonly T[], today: string): T[] {
-  return cards.filter((card) => !card.archivedAt && card.day !== null && card.day < today);
-}
-
-/** Re-date carried cards onto today so they stay in the working set; the inbox keeps its null. */
-export function carryOver<T extends DatedCard>(cards: readonly T[], today: string): T[] {
-  return cards.map((card) =>
-    !card.archivedAt && card.day !== null && card.day < today ? { ...card, day: today } : card,
-  );
-}
-
-/** Drop the stale unfinished cards instead of carrying them; the inbox keeps its null. */
-export function dropStale<T extends DatedCard>(cards: readonly T[], today: string): T[] {
-  return cards.filter((card) => card.archivedAt || card.day === null || card.day >= today);
-}
-
-/** Archived cards younger than the done window; older ones age to nothing. */
-export function doneThisWeek<T extends DatedCard>(
-  cards: readonly T[],
-  now: Date,
-  windowDays = DONE_WINDOW_DAYS,
-): T[] {
-  const cutoff = now.getTime() - windowDays * 86_400_000;
-  return cards.filter((card) => {
-    if (!card.archivedAt) return false;
-    // A card archived exactly windowDays ago has aged out; "after 7 days".
-    return Date.parse(card.archivedAt) > cutoff;
-  });
-}
-
-/**
- * Cards archived on the local `today`, whatever day they were born on: a
- * carried-over card finished this morning is today's win. Feeds the header
- * tally and the cleared-day state, so wins stay visible as the list shrinks.
- */
-export function doneTodayCount(cards: readonly DatedCard[], today: string): number {
-  let count = 0;
-  for (const card of cards) {
-    if (card.archivedAt && localDay(new Date(card.archivedAt)) === today) count++;
-  }
-  return count;
 }
 
 export function formatElapsed(startedAtMs: number, nowMs: number): string {
@@ -87,20 +36,4 @@ export function formatRelative(startedAtMs: number, nowMs: number): string {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
   return new Date(startedAtMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-/**
- * True when today's list is empty because the day's cards were all archived,
- * not because nothing was ever added. Drives the board's "Day's clear." state.
- * A dropped migration leaves no archived card dated today, so it still reads
- * as a first-run morning rather than a finished day.
- */
-export function clearedToday<T extends DatedCard>(cards: readonly T[], today: string): boolean {
-  let archivedToday = false;
-  for (const card of cards) {
-    if (card.day === null || card.day < today) continue;
-    if (!card.archivedAt) return false;
-    if (card.day === today) archivedToday = true;
-  }
-  return archivedToday;
 }

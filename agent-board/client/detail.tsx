@@ -4,6 +4,7 @@ import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { ExternalLink, Markdown } from "@getpaseo/plugin/client/ui";
 import { formatElapsed, formatRelative, localDay } from "../shared/day";
+import { siblingDay } from "../shared/week";
 import { cardKey, insertAtGroupEnd, isDuplicate, siblingTaskCard, taskDisplayTitle } from "../shared/groups";
 import { nextUp, type ChainInfo } from "../shared/gates";
 import { noteKey } from "../shared/notes";
@@ -231,10 +232,13 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
       toast.show(`${key} task "${title}" is already on the board`, { variant: "error" });
       return;
     }
-    // Today's task, even from an archived card's detail: copying the source's
-    // day would birth an instantly-stale card. The draft clears only after
-    // the save lands — a rejected write must not eat the typed title.
-    const sibling = { ...siblingTaskCard(card, title, newCardId(), new Date().toISOString()), day: localDay(new Date()) };
+    // The task joins its issue where the issue is parked, unless that day has
+    // passed (see siblingDay). The draft clears only after the save lands —
+    // a rejected write must not eat the typed title.
+    const sibling = {
+      ...siblingTaskCard(card, title, newCardId(), new Date().toISOString()),
+      day: siblingDay(card, localDay(new Date())),
+    };
     void board.updateCards((current) => insertAtGroupEnd(current, sibling)).then((reason) => {
       if (reason) {
         toast.show(`Couldn't save — ${reason}`, { variant: "error" });
@@ -260,7 +264,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
         const { next, undo } = recordArchive(current, ids, stamp);
         landed = {
           undo,
-          clearsDay: !next.some((entry) => !entry.archivedAt && entry.day !== null && entry.day >= today),
+          clearsDay: !next.some((entry) => !entry.archivedAt && entry.day === today),
         };
         return next;
       })
@@ -697,7 +701,7 @@ export function CardDetailScreen({ theme, params, navigation, onOpenCard, onOpen
           <View style={{ flex: 1 }} />
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={card.archivedAt ? "Restore card to Today" : "Archive card"}
+            accessibilityLabel={card.archivedAt ? "Restore card to the board" : "Archive card"}
             onPress={() => {
               // Archiving under a live agent gets the arm; Restore and quiet
               // archiving stay one tap.

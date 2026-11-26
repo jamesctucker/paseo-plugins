@@ -3,7 +3,8 @@ import { settingsRpc } from "@getpaseo/plugin";
 import { usePaseo, useRpc, useSettings } from "@getpaseo/plugin/client";
 import type { SettingsState } from "@getpaseo/plugin/client";
 import { boardDoc, type BoardCard, type BoardValues } from "../shared/settings";
-import { carryOver, dropStale, localDay } from "../shared/day";
+import { localDay } from "../shared/day";
+import { rollover, weekStart } from "../shared/week";
 import { declineKey } from "../shared/links";
 import type { AgentEntry } from "./agent-directory";
 
@@ -38,7 +39,8 @@ export interface BoardDoc {
    * than once) and should key on card ids, not closure state.
    */
   updateCards(transform: (cards: BoardCard[]) => BoardCard[]): Promise<string | null>;
-  answerMigration(carry: boolean): Promise<boolean>;
+  /** Answer the weekly rollover; null when saved, the host's rejection reason otherwise. */
+  answerRollover(choice: "monday" | "backlog" | "leave"): Promise<string | null>;
   dismissAttention(agentId: string, stamp: string): Promise<boolean>;
   addManualGate(text: string): Promise<string | null>;
   removeManualGate(id: string): Promise<string | null>;
@@ -60,7 +62,7 @@ export function useBoardDoc(): BoardDoc {
   const readBoard = useRpc(boardReadRpc);
   const lastGood = useRef<BoardValues>({
     cards: [],
-    migrationAnsweredDay: "",
+    rolloverAnsweredWeek: "",
     cardNotes: {},
     dismissedAttention: {},
     manualGates: {},
@@ -147,15 +149,16 @@ export function useBoardDoc(): BoardDoc {
     [mutate],
   );
 
-  const answerMigration = useCallback(
-    async (carry: boolean) => {
+  // Marking the week answered rides the same write as the move, so a prompt
+  // can never be dismissed without its cards going (or staying) where asked.
+  const answerRollover = useCallback(
+    async (choice: "monday" | "backlog" | "leave") => {
       const today = localDay(new Date());
-      const reason = await mutate((current) => ({
+      return mutate((current) => ({
         ...current,
-        cards: carry ? carryOver(current.cards, today) : dropStale(current.cards, today),
-        migrationAnsweredDay: today,
+        cards: rollover(current.cards, choice, today),
+        rolloverAnsweredWeek: weekStart(today),
       }));
-      return reason === null;
     },
     [mutate],
   );
@@ -258,7 +261,7 @@ export function useBoardDoc(): BoardDoc {
     saveValues,
     saveCards,
     updateCards,
-    answerMigration,
+    answerRollover,
     dismissAttention,
     addManualGate,
     removeManualGate,

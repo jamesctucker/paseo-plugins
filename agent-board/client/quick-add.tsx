@@ -6,8 +6,8 @@ import { parseQuickAdd } from "../shared/tracker";
 /**
  * The quick-add field at the foot of Today. A pasted Jira key resolves to a
  * Jira card; a GitHub pull reference becomes a spawnable local card; anything
- * else becomes a prompt card. Everything lands in the inbox first (amendment
- * 2026-11-20) — placement onto Today is its own act.
+ * else becomes a prompt card. Everything lands in the Backlog first (amendment
+ * 2026-11-20) — placing it on a day is its own act.
  */
 
 export interface QuickAddProps {
@@ -80,7 +80,7 @@ export function QuickAdd({ theme, compact, busy, error, onSubmit, onOpenSettings
         ) : (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Add to Inbox"
+            accessibilityLabel="Add to Backlog"
             onPress={() => void submit()}
             style={{
               backgroundColor: theme.colors.accent,

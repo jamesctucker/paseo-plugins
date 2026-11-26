@@ -1,25 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Animated,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-  type NativeSyntheticEvent,
-  type TextInputKeyPressEventData,
-} from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from "react-native";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { usePaseo, useRpc } from "@getpaseo/plugin/client";
 import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { boardCapabilitiesRpc, boardStopRpc, githubGetRpc, issueSearchRpc, linearSearchRpc } from "../shared/contracts";
 import { newCardId, type BoardCard } from "../shared/settings";
-import { clearedToday, doneThisWeek, doneTodayCount, localDay, staleCards } from "../shared/day";
-import { inboxCards, moveInboxToToday } from "../shared/inbox";
+import { localDay } from "../shared/day";
+import { addDays, beforeThisWeek, columnCards, dayLabel, doneOn, liveInWeek, moveCardsToDay, nudgeCards, nudgedDay, weekDays, weekStart } from "../shared/week";
 import { parseQuickAdd } from "../shared/tracker";
-import { buildGroups, insertAtGroupEnd, isDuplicate, placeCard, showHeader, type CardGroup } from "../shared/groups";
+import { buildGroups, insertAtGroupEnd, isDuplicate, neighborIndex, placeCard, type CardGroup } from "../shared/groups";
 import { recordArchive, type ArchiveUndo } from "../shared/undo";
 import { ArchiveUndoBar, pushArchiveUndo, useArchiveUndo } from "./undo";
 import { prSignalForCard } from "../shared/pr-signal";
@@ -31,29 +21,52 @@ import { agentMatchText, linkSuggestions } from "../shared/links";
 import { useGates } from "./gates";
 import { CardRow } from "./card-row";
 import { ChannelDock, type Channel } from "./dock";
-import { InboxSection } from "./inbox";
 import { Rail, type PermissionResponse } from "./rail";
 import { QuickAdd } from "./quick-add";
 import { JiraSheet } from "./jira-sheet";
 import { GitHubSheet } from "./github-sheet";
 import { LinearSheet } from "./linear-sheet";
-import { Chip, GroupLabel, monoFont, useReduceMotion } from "./ui";
+import {
+  ColumnBody,
+  ColumnHeading,
+  DayStrip,
+  EmptyBoard,
+  MoveBar,
+  RolloverBanner,
+  ToolbarButton,
+  WeekGrid,
+  WeekToolbar,
+  type DropTarget,
+  type RenderCardOptions,
+} from "./week-board";
 
 /**
- * The board: Today list on the left (~60%), live rail on the right, and a
- * narrow channel dock at the far edge where the integrations live. Three
- * width tiers, because the host's compact flag only covers phones: wide
- * desktop gets a 340pt rail, mid windows shrink the rail before Today, and
- * narrow windows stack like compact — one scroll (Today, Running, Review,
- * the quiet Done-this-week divider) with quick-add pinned at the foot and
- * the channels as header buttons. Cards render from the cached document
- * even while the host is unreachable.
+ * The board: the week on the left, the live rail on the right, and a narrow
+ * channel dock at the far edge where the integrations live.
+ *
+ * The week (amendment 2026-11-20) is a backlog column plus seven day
+ * columns. Quick-add captures into the backlog; putting a card on a day is
+ * the planning ritual, and it works three ways — pick a card up and tap a
+ * column, slide it with the bar's buttons or the arrow keys, or select
+ * several and move them together. Nothing moves between days on its own:
+ * unfinished work stays where it was planned until the once-a-week rollover
+ * prompt.
+ *
+ * Three width tiers, because the host's compact flag only covers phones:
+ * wide desktop gets the grid and a 340pt rail, mid windows shrink the rail
+ * before the grid, and below 720pt the board stacks — a chip strip stands in
+ * for the columns, the chosen column renders as one list, and the rail
+ * follows it. Cards render from the cached document even while the host is
+ * unreachable.
  */
 
 export interface BoardScreenProps extends PluginScreenProps {
   onOpenSettings(): void;
   onOpenCard(cardId: string): void;
 }
+
+/** Past which a slide reads as "a week", in days. */
+const WEEK_SLIDE = 7;
 
 export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenCard }: BoardScreenProps) {
   const board = useBoardDoc();
@@ -72,14 +85,27 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   const { width } = useWindowDimensions();
   // The host's compact flag only covers phones; a narrow desktop window hits
   // the same wall, so the board keeps its own breakpoint. Below it the rail
-  // would eat the whole row (340 + 48 fixed against a flex Today column).
+  // would eat the whole row (340 + 48 fixed against a flex board column).
   const stacked = layout.compact || width < 720;
   // Above the breakpoint the rail gives up width first: full 340pt on wide
   // screens, shrinking toward 240pt before the layout stacks.
   const railWidth = Math.max(240, Math.min(340, Math.round(width * 0.36)));
 
   const [openChannel, setOpenChannel] = useState<Channel | null>(null);
+  /** The card picked up for a move (long-press, or the hover grip on desktop). */
   const [reorderId, setReorderId] = useState<string | null>(null);
+  /** The hidden input that owns arrow/Escape keys while a card is in hand. */
+  const moveKeysInput = useRef<TextInput | null>(null);
+  /** Cards checked for a group move; a non-empty set is a selection session. */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  /** Taps toggle selection instead of opening detail (turned on by the toolbar or the first circle). */
+  const [selectMode, setSelectMode] = useState(false);
+  /** Monday of the visible week. Null follows today, so the view rolls over on its own. */
+  const [viewWeek, setViewWeek] = useState<string | null>(null);
+  /** The stacked layout's chosen column. Undefined follows today; null is the backlog. */
+  const [stripDay, setStripDay] = useState<string | null | undefined>(undefined);
+  /** The grid's measured width; 0 until the first layout pass. */
+  const [boardWidth, setBoardWidth] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [canStop, setCanStop] = useState(false);
@@ -168,18 +194,27 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     else toast.show(`Linked to ${card.jiraKey ?? (card.github ? `#${card.github.number}` : card.title)}`, { variant: "success" });
   }
 
-  const { todayCards, done, stale, doneToday, inbox } = useMemo(
-    () => ({
-      todayCards: cards.filter((card) => !card.archivedAt && card.day !== null && card.day >= today),
-      done: doneThisWeek(cards, new Date()),
-      stale: staleCards(cards, today),
-      doneToday: doneTodayCount(cards, today),
-      inbox: inboxCards(cards),
-    }),
-    [cards, today],
-  );
+  const week = viewWeek ?? weekStart(today);
+  const days = useMemo(() => weekDays(week), [week]);
+  /** Every live card, whichever column it is in: the rail follows agents from any day. */
+  const live = useMemo(() => cards.filter((card) => !card.archivedAt), [cards]);
+  const backlog = useMemo(() => columnCards(cards, null), [cards]);
+  const byDay = useMemo(() => new Map(days.map((day) => [day, columnCards(cards, day)] as const)), [cards, days]);
+  const doneByDay = useMemo(() => new Map(days.map((day) => [day, doneOn(cards, day)] as const)), [cards, days]);
+  /** The rows each column shows, in render order: what tap-to-place indexes. */
+  const rowsByColumn = useMemo(() => {
+    const rows = new Map<string | null, BoardCard[]>([[null, buildGroups(backlog).flatMap((group) => group.cards)]]);
+    for (const day of days) rows.set(day, buildGroups(byDay.get(day) ?? []).flatMap((group) => group.cards));
+    return rows;
+  }, [backlog, byDay, days]);
 
-  const needMigration = stale.length > 0 && board.values.migrationAnsweredDay !== today;
+  const earlier = useMemo(() => beforeThisWeek(cards, today), [cards, today]);
+  const needRollover = earlier.length > 0 && board.values.rolloverAnsweredWeek !== weekStart(today);
+  const inHand = reorderId !== null || selected.size > 0;
+  // A week you cannot see should not look empty: the arrows count its live cards.
+  const prevWeekCount = liveInWeek(cards, addDays(week, -7));
+  const nextWeekCount = liveInWeek(cards, addDays(week, 7));
+  const firstRun = cards.length === 0;
 
   // The Done-nag asks once: a toast when a not-Done issue first parks, never
   // again — the standing lane item does the reminding after that. Gates that
@@ -228,7 +263,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
 
   /**
    * New cards carry the day they're destined for: quick-add captures land in
-   * the inbox (null, amendment 2026-11-20) and channel-sheet picks go
+   * the backlog (null, amendment 2026-11-20) and channel-sheet picks go
    * straight onto today.
    */
   function taskCardBase(day: string | null): Pick<BoardCard, "id" | "body" | "day" | "createdAt" | "archivedAt" | "runs"> {
@@ -262,7 +297,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     return addTaskCard(card, issue.identifier);
   }
 
-  /** Quick-add task: the issue is real, the task title is the user's. Lands in the inbox. */
+  /** Quick-add task: the issue is real, the task title is the user's. Lands in the backlog. */
   async function addTaskFromTracker(
     issue: { identifier: string; title: string; status: string; url: string; route?: "rote" | "creative" },
     source: "jira" | "linear",
@@ -378,39 +413,156 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     }
   }
 
-  const groups = useMemo(() => buildGroups(todayCards), [todayCards]);
-  // The row order the user sees: groups flatten back to a single list whose
-  // indexes are what tap-to-place targets.
-  const visibleCards = useMemo(() => groups.flatMap((group) => group.cards), [groups]);
+  // ---- Placement ----------------------------------------------------------
 
-  function placeReorder(targetIndex: number) {
-    if (!reorderId) return;
-    const movingId = reorderId;
-    setReorderId(null);
-    // placeCard anchors on card ids, so it stays correct when the transform
-    // rebases onto a doc that moved since this render.
-    void saveOrExplain((current) => placeCard(current, visibleCards, movingId, targetIndex));
+  /** Pick a card up. A move and a selection are different hands, so one replaces the other. */
+  function arm(cardId: string) {
+    setSelected(new Set());
+    setSelectMode(false);
+    setReorderId(reorderId === cardId ? null : cardId);
   }
 
-  // Keyboard reorder (Workboard borrow): while a move is armed, arrows walk
-  // the card one row at a time and Escape cancels. The reorder stays armed so
-  // repeated presses keep moving; a tap or Escape ends it. Desktop only —
-  // the capture input is not mounted where it would pop a soft keyboard.
-  function onReorderKey(event: NativeSyntheticEvent<TextInputKeyPressEventData>) {
+  function endSelection() {
+    setSelected(new Set());
+    setSelectMode(false);
+  }
+
+  function toggleSelect(cardId: string) {
+    setReorderId(null);
+    const next = new Set(selected);
+    if (next.has(cardId)) next.delete(cardId);
+    else next.add(cardId);
+    setSelected(next);
+    // Unchecking the last card ends the session, so taps go back to opening detail.
+    setSelectMode(next.size > 0);
+  }
+
+  function toggleSelectMode() {
+    if (selectMode) endSelection();
+    else {
+      setReorderId(null);
+      setSelectMode(true);
+    }
+  }
+
+  function movedToast(count: number, day: string | null) {
+    toast.show(`Moved ${count === 1 ? "card" : `${count} cards`} to ${day === null ? "the backlog" : dayLabel(day)}`);
+  }
+
+  /**
+   * A tap inside a column while something is in hand. With a card picked
+   * up, a row tap in its own column is a precise reorder and anything else
+   * names the destination column. With a selection, the whole set moves.
+   */
+  function placeAt(day: string | null, rowIndex: number | null) {
+    if (reorderId) {
+      const moving = cards.find((card) => card.id === reorderId);
+      setReorderId(null);
+      if (!moving) return;
+      if (moving.day === day && rowIndex !== null) {
+        void saveOrExplain((current) => placeCard(current, rowsByColumn.get(day) ?? [], moving.id, rowIndex));
+      } else {
+        void saveOrExplain((current) => moveCardsToDay(current, new Set([moving.id]), day));
+      }
+      return;
+    }
+    if (selected.size === 0) return;
+    const moving = selected;
+    void saveOrExplain((current) => moveCardsToDay(current, moving, day)).then((saved) => {
+      if (saved) movedToast(moving.size, day);
+    });
+    endSelection();
+  }
+
+  /**
+   * Toolbar buttons steal focus from the hidden key-capture input, silently
+   * killing arrows and Escape mid-move. Anything that keeps a card in hand
+   * hands the keys back.
+   */
+  function regainMoveKeys() {
+    if (reorderId) moveKeysInput.current?.focus();
+  }
+
+  /**
+   * Slide what is in hand a fixed number of days: the following day, or
+   * the following week. The view follows a card in hand across the week
+   * boundary; a selection stays put and says where it went instead.
+   */
+  function slide(deltaDays: number) {
+    regainMoveKeys();
+    const moving = reorderId ? new Set([reorderId]) : selected;
+    if (moving.size === 0) return;
+    const landed = cards
+      .filter((card) => moving.has(card.id) && !card.archivedAt)
+      .map((card) => nudgedDay(card.day, deltaDays, today))
+      .filter((day): day is string => day !== null);
+    if (landed.length === 0) return;
+    void saveOrExplain((current) => nudgeCards(current, moving, deltaDays, today)).then((saved) => {
+      if (!saved) return;
+      const away = landed.filter((day) => weekStart(day) !== week);
+      if (reorderId) {
+        if (away.length === landed.length) setViewWeek(weekStart(away[0]));
+        return;
+      }
+      if (away.length > 0) {
+        const where = away.length === landed.length ? dayLabel(landed[0]) : "another week";
+        toast.show(`Moved ${moving.size === 1 ? "card" : `${moving.size} cards`} to ${where}`);
+      }
+      endSelection();
+    });
+  }
+
+  function navigate(deltaWeeks: number) {
+    regainMoveKeys();
+    const next = addDays(week, deltaWeeks * 7);
+    setViewWeek(next);
+    // The stacked layout keeps its weekday when it flips weeks.
+    setStripDay((current) => (typeof current === "string" ? addDays(current, deltaWeeks * 7) : next));
+  }
+
+  function showThisWeek() {
+    regainMoveKeys();
+    setViewWeek(null);
+    setStripDay(undefined);
+  }
+
+  function pickStripDay(day: string | null) {
+    // With something in hand the chips are drop targets, not navigation.
+    if (inHand) placeAt(day, null);
+    else setStripDay(day);
+  }
+
+  async function handleRollover(choice: "monday" | "backlog" | "leave") {
+    const reason = await board.answerRollover(choice);
+    if (reason) setError(`Couldn't save — ${reason}`);
+  }
+
+  // Keyboard (Workboard borrow): while a move is armed, up and down walk the
+  // card one row at a time, left and right slide it a day, and Escape puts
+  // it down. The move stays armed so repeated presses keep going; a tap or
+  // Escape ends it. Desktop only — the capture input is not mounted where it
+  // would pop a soft keyboard.
+  function onMoveKey(event: NativeSyntheticEvent<TextInputKeyPressEventData>) {
     const key = event.nativeEvent.key;
     if (key === "Escape") {
       setReorderId(null);
       return;
     }
-    if (!reorderId || (key !== "ArrowUp" && key !== "ArrowDown")) return;
-    const index = visibleCards.findIndex((card) => card.id === reorderId);
-    if (index < 0) {
+    if (!reorderId) return;
+    if (key === "ArrowLeft" || key === "ArrowRight") {
+      slide(key === "ArrowLeft" ? -1 : 1);
+      return;
+    }
+    if (key !== "ArrowUp" && key !== "ArrowDown") return;
+    const moving = cards.find((card) => card.id === reorderId);
+    if (!moving) {
       setReorderId(null);
       return;
     }
-    const target = Math.max(0, Math.min(visibleCards.length - 1, index + (key === "ArrowUp" ? -1 : 1)));
-    if (target === index) return;
-    void saveOrExplain((current) => placeCard(current, visibleCards, reorderId, target));
+    const rows = rowsByColumn.get(moving.day) ?? [];
+    const target = neighborIndex(rows, moving.id, key === "ArrowUp" ? -1 : 1);
+    if (target < 0 || target > rows.length) return;
+    void saveOrExplain((current) => placeCard(current, rows, moving.id, target));
   }
 
   function archiveGroup(group: CardGroup) {
@@ -437,7 +589,51 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     return prSignalForCard(card, workspaceId ? workspaceRuntimes.get(workspaceId)?.pullRequest : null);
   }
 
-  const weekday = new Date().toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+  /** One card, wherever it renders. What a tap does depends on what is in hand. */
+  function renderCard(card: BoardCard, { dense, grouped }: RenderCardOptions) {
+    return (
+      <CardRow
+        key={card.id}
+        theme={theme}
+        card={card}
+        agent={latestAgent(card, agents)}
+        runStartedAt={latestStart(card)}
+        prSignal={hostPrSignal(card)}
+        hasNote={noteKeys.has(noteKey(card))}
+        now={now}
+        active={reorderId === card.id}
+        selected={selected.has(card.id)}
+        // The backlog keeps its circles up with no session; elsewhere they come with one.
+        showSelect={selectMode || card.day === null}
+        onToggleSelect={() => toggleSelect(card.id)}
+        dense={dense}
+        compact={layout.compact}
+        grouped={grouped}
+        onPress={() => {
+          if (reorderId) placeAt(card.day, rowsByColumn.get(card.day)?.indexOf(card) ?? null);
+          else if (selectMode) toggleSelect(card.id);
+          else onOpenCard(card.id);
+        }}
+        onLongPress={() => arm(card.id)}
+        onOpenAgent={card.runs.length > 0 ? () => openAgent(card.runs[card.runs.length - 1].agentId) : undefined}
+        suggestion={(() => {
+          const agent = suggestions.get(card.id)?.[0];
+          return agent ? (agentMatchText(agent, card, workspaceTitles) ?? agent.title ?? "Untitled agent") : null;
+        })()}
+        onLinkSuggestion={() => {
+          const agent = suggestions.get(card.id)?.[0];
+          return agent ? linkSuggested(card, agent) : Promise.resolve();
+        }}
+        onDeclineSuggestion={() => {
+          const agent = suggestions.get(card.id)?.[0];
+          if (!agent) return;
+          void board.declineLink(card.id, agent.id).then((reason) => {
+            if (reason) toast.show(`Couldn't save — ${reason}`, { variant: "error" });
+          });
+        }}
+      />
+    );
+  }
 
   const channelButton = (channel: Channel, label: string) => (
     <Pressable
@@ -458,157 +654,66 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     </Pressable>
   );
 
-  const todayHeader = (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        flexWrap: "wrap",
-        paddingHorizontal: 12,
-        paddingTop: 10,
-        paddingBottom: 4,
-        gap: 8,
-      }}
-    >
-      <GroupLabel theme={theme} text="Today" />
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, flexShrink: 1 }} numberOfLines={1}>
-        {weekday}
+  const selectButton = (
+    <ToolbarButton theme={theme} label={selectMode ? "Stop selecting" : "Select cards"} onPress={toggleSelectMode}>
+      <Icon
+        name="ListChecks"
+        size={13}
+        color={selectMode ? theme.colors.accent : theme.colors.foregroundMuted}
+      />
+      <Text style={{ color: selectMode ? theme.colors.accent : theme.colors.foregroundMuted, fontSize: 11 }}>
+        {selectMode ? "Selecting" : "Select"}
       </Text>
-      {/* The day's wins stay on screen while the list shrinks; archiving
-          otherwise reads as things disappearing, not things getting done. */}
-      {doneToday > 0 && todayCards.length > 0 ? (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-          <Icon name="Check" size={11} color={theme.colors.statusSuccess} />
-          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{doneToday} done</Text>
-        </View>
-      ) : null}
-      <View style={{ flex: 1 }} />
-      {/* Wide desktop's channel entry is the dock; stacked layouts have none. */}
-      {stacked ? channelButton("jira", "Jira") : null}
-      {stacked ? channelButton("github", "GitHub") : null}
-      {stacked ? channelButton("linear", "Linear") : null}
-    </View>
+    </ToolbarButton>
   );
+
+  const movingCard = reorderId ? (cards.find((card) => card.id === reorderId) ?? null) : null;
+  const slideActions = [
+    { label: "Next day", onPress: () => slide(1) },
+    { label: "Next week", onPress: () => slide(WEEK_SLIDE) },
+  ];
 
   const notices = (
     <>
-      {needMigration ? <MigrationBanner theme={theme} count={stale.length} onAnswer={board.answerMigration} /> : null}
+      {needRollover ? <RolloverBanner theme={theme} count={earlier.length} onAnswer={handleRollover} /> : null}
       {archiveUndo ? <ArchiveUndoBar theme={theme} undo={archiveUndo} onUndo={runUndo} /> : null}
-      {reorderId ? (
-        <Text style={{ color: theme.colors.accent, fontSize: 11, paddingHorizontal: 14, paddingVertical: 4 }}>
-          {stacked ? "Moving, tap a position to place the card." : "Moving: tap a position, or arrow keys — Esc cancels."}
-        </Text>
+      {movingCard ? (
+        <MoveBar
+          theme={theme}
+          message={`Moving “${movingCard.title}”`}
+          hint={stacked ? "Tap a day to place it." : "Tap a day to place it · ← → slide a day · ↑ ↓ reorder · Esc puts it down"}
+          actions={movingCard.day === null ? slideActions : [...slideActions, { label: "Backlog", onPress: () => placeAt(null, null) }]}
+          onCancel={() => setReorderId(null)}
+          cancelLabel="Put down"
+        />
+      ) : null}
+      {selected.size > 0 ? (
+        <MoveBar
+          theme={theme}
+          message={`${selected.size} selected`}
+          hint={stacked ? "Tap a day to move them." : "Tap a day to move them all."}
+          actions={[...slideActions, { label: "Backlog", onPress: () => placeAt(null, null) }]}
+          onCancel={endSelection}
+          cancelLabel="Clear"
+        />
       ) : null}
       {reorderId && !stacked ? (
         <TextInput
+          ref={moveKeysInput}
           autoFocus
           value=""
           onChangeText={() => {}}
-          onKeyPress={onReorderKey}
-          accessibilityLabel="Arrow keys move the card, Escape cancels"
+          onKeyPress={onMoveKey}
+          accessibilityLabel="Arrow keys move the card, Escape puts it down"
           style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
         />
       ) : null}
     </>
   );
 
-  const todayList =
-    todayCards.length === 0 && !needMigration ? (
-      <EmptyToday
-        theme={theme}
-        cleared={clearedToday(cards, today)}
-        doneToday={doneToday}
-        onAddFromJira={() => setOpenChannel("jira")}
-        onNewPrompt={() => quickAddInput.current?.focus()}
-      />
-    ) : (
-      (() => {
-        // Row indexes count the flattened visible order, which is what
-        // tap-to-place targets — headers are not rows.
-        let rowIndex = 0;
-        return groups.map((group) => {
-          const header = showHeader(group);
-          const rows = group.cards.map((card) => {
-            const index = rowIndex++;
-            return (
-              <CardRow
-                key={card.id}
-                theme={theme}
-                card={card}
-                agent={latestAgent(card, agents)}
-                runStartedAt={latestStart(card)}
-                prSignal={hostPrSignal(card)}
-                hasNote={noteKeys.has(noteKey(card))}
-                now={now}
-                active={reorderId === card.id}
-                compact={layout.compact}
-                grouped={header}
-                onPress={() => {
-                  if (reorderId) placeReorder(index);
-                  else onOpenCard(card.id);
-                }}
-                onLongPress={() => setReorderId(reorderId === card.id ? null : card.id)}
-                onOpenAgent={card.runs.length > 0 ? () => openAgent(card.runs[card.runs.length - 1].agentId) : undefined}
-                suggestion={(() => {
-                  const agent = suggestions.get(card.id)?.[0];
-                  return agent ? (agentMatchText(agent, card, workspaceTitles) ?? agent.title ?? "Untitled agent") : null;
-                })()}
-                onLinkSuggestion={() => {
-                  const agent = suggestions.get(card.id)?.[0];
-                  return agent ? linkSuggested(card, agent) : Promise.resolve();
-                }}
-                onDeclineSuggestion={() => {
-                  const agent = suggestions.get(card.id)?.[0];
-                  if (!agent) return;
-                  void board.declineLink(card.id, agent.id).then((reason) => {
-                    if (reason) toast.show(`Couldn't save — ${reason}`, { variant: "error" });
-                  });
-                }}
-              />
-            );
-          });
-          return (
-            <View key={group.key ?? group.cards[0].id}>
-              {header ? (
-                <GroupHeader theme={theme} group={group} onArchiveAll={() => archiveGroup(group)} />
-              ) : null}
-              {rows}
-            </View>
-          );
-        });
-      })()
-    );
-
-  const inboxSection =
-    inbox.length > 0 ? (
-      <InboxSection
-        theme={theme}
-        cards={inbox}
-        onMove={(ids) => saveOrExplain((current) => moveInboxToToday(current, ids, today))}
-      />
-    ) : null;
-
-  const doneSection =
-    done.length > 0 ? (
-      <View style={{ marginTop: 10, paddingHorizontal: 12 }}>
-        <View style={{ height: 1, backgroundColor: theme.colors.border, marginBottom: 8 }} />
-        <GroupLabel theme={theme} text={`Done this week · ${done.length}`} />
-        {done.map((card) => (
-          <Pressable
-            key={card.id}
-            accessibilityRole="button"
-            accessibilityLabel={card.title}
-            onPress={() => onOpenCard(card.id)}
-            style={{ paddingVertical: 4 }}
-          >
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }} numberOfLines={1}>
-              {card.jiraKey ? `${card.jiraKey} ` : ""}
-              {card.title}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-    ) : null;
+  const emptyBoard = (
+    <EmptyBoard theme={theme} onAddFromChannel={() => setOpenChannel("jira")} onNewPrompt={() => quickAddInput.current?.focus()} />
+  );
 
   const quickAddField = (
     <QuickAdd
@@ -625,7 +730,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   const rail = (
     <Rail
       theme={theme}
-      cards={todayCards}
+      cards={live}
       agents={agents}
       now={now}
       offline={offline}
@@ -677,16 +782,69 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     </>
   );
 
+  const toolbar = (
+    <WeekToolbar
+      theme={theme}
+      week={week}
+      today={today}
+      prevCount={prevWeekCount}
+      nextCount={nextWeekCount}
+      onNavigate={navigate}
+      onThisWeek={showThisWeek}
+      trailing={
+        <>
+          {stacked ? channelButton("jira", "Jira") : null}
+          {stacked ? channelButton("github", "GitHub") : null}
+          {stacked ? channelButton("linear", "Linear") : null}
+          {selectButton}
+        </>
+      }
+    />
+  );
+
   if (stacked) {
+    const shownDay = stripDay === undefined ? today : stripDay;
+    const shownLive = shownDay === null ? backlog : byDay.get(shownDay) ?? [];
+    const shownDone = shownDay === null ? [] : doneByDay.get(shownDay) ?? [];
     return (
       <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }}>
-          {inboxSection}
-          {todayHeader}
+          {toolbar}
           {notices}
-          {todayList}
+          {firstRun ? (
+            emptyBoard
+          ) : (
+            <>
+              <DayStrip
+                theme={theme}
+                week={week}
+                today={today}
+                selected={shownDay}
+                backlogCount={backlog.length}
+                onSelect={pickStripDay}
+              />
+              <ColumnHeading
+                theme={theme}
+                title={shownDay === null ? "Backlog" : shownDay === today ? "Today" : dayLabel(shownDay)}
+                subtitle={shownDay === null && backlog.length > 0 ? `${backlog.length} parked` : shownDay === today ? dayLabel(today) : null}
+                done={shownDone.length}
+              />
+              <ColumnBody
+                theme={theme}
+                day={shownDay}
+                live={shownLive}
+                done={shownDone}
+                dense={false}
+                droppable={inHand}
+                cleared={shownDay === today && shownLive.length === 0 && shownDone.length > 0 ? { done: shownDone.length } : null}
+                renderCard={renderCard}
+                onArchiveAll={archiveGroup}
+                onOpenCard={onOpenCard}
+                onDrop={(day) => placeAt(day, null)}
+              />
+            </>
+          )}
           {rail}
-          {doneSection}
         </ScrollView>
         {quickAddField}
         {sheets}
@@ -698,14 +856,27 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     <View style={{ flex: 1, backgroundColor: theme.colors.surface0, flexDirection: "row" }}>
       {/* minWidth: 0 so a narrow window shrinks this column instead of its
           children overflowing into the rail. */}
-      <View style={{ flex: 1, minWidth: 0 }}>
-        {inboxSection}
-        {todayHeader}
+      <View style={{ flex: 1, minWidth: 0 }} onLayout={(event) => setBoardWidth(event.nativeEvent.layout.width)}>
+        {toolbar}
         {notices}
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 4 }}>
-          {todayList}
-          {doneSection}
-        </ScrollView>
+        {firstRun ? (
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }}>
+            {emptyBoard}
+          </ScrollView>
+        ) : (
+          <WeekGrid
+            theme={theme}
+            week={week}
+            today={today}
+            cards={cards}
+            available={Math.max(boardWidth - 8, 0)}
+            droppable={inHand}
+            renderCard={renderCard}
+            onArchiveAll={archiveGroup}
+            onOpenCard={onOpenCard}
+            onDrop={({ day, rowIndex }: DropTarget) => placeAt(day, rowIndex)}
+          />
+        )}
         {quickAddField}
       </View>
       <View style={{ width: railWidth, borderLeftWidth: 1, borderLeftColor: theme.colors.border }}>{rail}</View>
@@ -715,182 +886,6 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
         onOpen={(channel) => setOpenChannel(openChannel === channel ? null : channel)}
       />
       {sheets}
-    </View>
-  );
-}
-
-/**
- * The issue anchor above a task group: mono key, the denormalized issue
- * title, the mirrored status badge (one per issue, not per task), and the
- * close-out shortcut. Archiving is per-task otherwise; this is the group act.
- */
-function GroupHeader({
-  theme,
-  group,
-  onArchiveAll,
-}: {
-  theme: PluginTheme;
-  group: CardGroup;
-  onArchiveAll(): void;
-}) {
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-        paddingHorizontal: 12,
-        paddingTop: 10,
-        paddingBottom: 2,
-      }}
-    >
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, fontFamily: monoFont, fontWeight: "600" }}>
-        {group.key}
-      </Text>
-      {group.issueTitle !== group.key ? (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, flexShrink: 1 }} numberOfLines={1}>
-          {group.issueTitle}
-        </Text>
-      ) : null}
-      {group.status ? <Chip theme={theme} text={group.status} color={theme.colors.foregroundMuted} style={{ flexShrink: 1 }} /> : null}
-      <View style={{ flex: 1 }} />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Archive all tasks for ${group.key}`}
-        onPress={onArchiveAll}
-        hitSlop={6}
-      >
-        <Icon name="Archive" size={13} color={theme.colors.foregroundMuted} />
-      </Pressable>
-    </View>
-  );
-}
-
-function MigrationBanner({
-  theme,
-  count,
-  onAnswer,
-}: {
-  theme: PluginTheme;
-  count: number;
-  onAnswer(carry: boolean): Promise<boolean>;
-}) {
-  return (
-    <View
-      style={{
-        marginHorizontal: 12,
-        marginTop: 4,
-        padding: 10,
-        borderRadius: 8,
-        backgroundColor: theme.colors.surface1,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        gap: 8,
-      }}
-    >
-      <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>
-        Carry over {count} unfinished from yesterday?
-      </Text>
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Carry cards over"
-          onPress={() => void onAnswer(true)}
-          style={{ backgroundColor: theme.colors.accent, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 5 }}
-        >
-          <Text style={{ color: theme.colors.accentForeground, fontSize: 12, fontWeight: "600" }}>Carry over</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="Drop unfinished cards" onPress={() => void onAnswer(false)} style={{ paddingVertical: 5, paddingHorizontal: 8 }}>
-          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Drop</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function EmptyToday({
-  theme,
-  cleared,
-  doneToday,
-  onAddFromJira,
-  onNewPrompt,
-}: {
-  theme: PluginTheme;
-  /** Today's cards were all archived: a finished day, not a fresh morning. */
-  cleared: boolean;
-  doneToday: number;
-  onAddFromJira(): void;
-  onNewPrompt(): void;
-}) {
-  // Clearing the list is the board's one earned celebration: the check lands
-  // with a single settle, then holds still. Never loops, never replays on
-  // relayout (the mount is the moment).
-  const reduceMotion = useReduceMotion();
-  const settle = useRef(new Animated.Value(cleared && !reduceMotion ? 0 : 1)).current;
-  useEffect(() => {
-    if (!cleared || reduceMotion) {
-      settle.setValue(1);
-      return;
-    }
-    const animation = Animated.spring(settle, { toValue: 1, friction: 6, tension: 140, useNativeDriver: true });
-    animation.start();
-    return () => animation.stop();
-  }, [settle, cleared, reduceMotion]);
-
-  const beforeNoon = new Date().getHours() < 12;
-  const clearedCopy = beforeNoon
-    ? "Cleared before noon. The afternoon is yours; add more only if you want it."
-    : "Everything on today's list is done. Add more only if the day isn't actually over.";
-
-  return (
-    <View style={{ padding: 24, gap: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        {cleared ? (
-          <Animated.View
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 10,
-              backgroundColor: theme.colors.statusSuccess,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: settle,
-              transform: [{ scale: settle.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }],
-            }}
-          >
-            <Icon name="Check" size={13} color={theme.colors.surface0} />
-          </Animated.View>
-        ) : null}
-        <Text style={{ color: theme.colors.foreground, fontSize: 16, fontWeight: "600" }}>
-          {cleared ? "Day's clear." : "What's today?"}
-        </Text>
-        {cleared && doneToday > 0 ? (
-          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>
-            {doneToday} done
-          </Text>
-        ) : null}
-      </View>
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-        {cleared ? clearedCopy : "Pull the day's commitments in from Jira, or write a prompt card below."}
-      </Text>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4 }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Add from Jira"
-          onPress={onAddFromJira}
-          style={{ backgroundColor: theme.colors.accent, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
-        >
-          <Text style={{ color: theme.colors.accentForeground, fontSize: 12, fontWeight: "600" }}>Add from Jira</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="New prompt card"
-          onPress={onNewPrompt}
-          style={{ paddingVertical: 6, paddingHorizontal: 8 }}
-        >
-          <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>New prompt card</Text>
-        </Pressable>
-      </View>
     </View>
   );
 }

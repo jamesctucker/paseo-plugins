@@ -158,11 +158,41 @@ export function placeCard(
   }
 
   // Onto another group: the whole group moves as a unit, task order kept.
-  const unit = cards.filter((card) => cardKey(card) === movingKey);
-  const others = cards.filter((card) => cardKey(card) !== movingKey);
-  const anchorId = target ? others.find((card) => cardKey(card) === cardKey(target))?.id : null;
-  const at = anchorId ? others.findIndex((card) => card.id === anchorId) : others.length;
+  // Only rows this list shows join the move: on the week board a group can
+  // also hold cards in other columns, and those stay where they are. The
+  // anchor is the target group's first row in this list for the same reason
+  // — anchoring on the group's first card anywhere would land the unit in a
+  // column the user cannot see.
+  const listed = new Set(visible.map((card) => card.id));
+  const unit = cards.filter((card) => listed.has(card.id) && cardKey(card) === movingKey);
+  const unitIds = new Set(unit.map((card) => card.id));
+  const others = cards.filter((card) => !unitIds.has(card.id));
+  const anchor = target ? visible.find((card) => cardKey(card) === cardKey(target)) : null;
+  const at = anchor ? others.findIndex((card) => card.id === anchor.id) : others.length;
   const next = [...others];
   next.splice(at < 0 ? others.length : at, 0, ...unit);
   return next;
+}
+
+/**
+ * The tap-to-place index that walks a card one row up or down. Placement
+ * anchors before the tapped row, so a step down skips the next row, and a
+ * group steps over the next group as a unit. A negative result means the
+ * card is already at the top, a result past `visible.length` that it is at
+ * the bottom, and `visible.length` itself is the list's end.
+ */
+export function neighborIndex(visible: readonly BoardCard[], movingId: string, direction: -1 | 1): number {
+  const index = visible.findIndex((card) => card.id === movingId);
+  if (index < 0) return -1;
+  if (direction < 0) return index - 1;
+  const key = cardKey(visible[index]);
+  let unitEnd = index;
+  // Prompt cards have no group: each is its own unit (their shared null key
+  // is an absence, not an identity).
+  if (key !== null) {
+    for (let i = index + 1; i < visible.length; i++) {
+      if (cardKey(visible[i]) === key) unitEnd = i;
+    }
+  }
+  return unitEnd + 2;
 }

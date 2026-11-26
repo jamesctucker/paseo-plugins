@@ -1,15 +1,25 @@
 # Agent Board
 
-A [Paseo](https://paseo.sh) plugin: a daily execution board for one person. Today's committed
-work on the left (Jira, GitHub, and Linear cards plus local prompt cards), live agents on the
-right. Complements a paper bullet journal; it never replaces the tracker or the plan.
+A [Paseo](https://paseo.sh) plugin: a full-week execution board for one person. A Backlog
+column plus Monday-through-Sunday day columns (Jira, GitHub, and Linear cards plus local prompt
+cards), live agents on the right. Complements a paper bullet journal; it never replaces the
+tracker or the plan.
 
-- **Today list**: transcribed each morning. Quick-add accepts a Jira key (`PROJ-142`), a GitHub
-  pull reference (`owner/repo#123`), or plain text as a prompt card. Unfinished cards from
-  yesterday get a one-tap carry-over prompt.
-- **Inbox**: quick-add lands in the inbox, a quiet section above Today. Select rows and move
-  them onto Today in one action; channel-sheet picks still go straight to Today. The inbox never
-  nags — no age tint, no count badge, hidden when empty.
+- **Week board**: Backlog on the far left, then the week's seven days. Weekend columns stay
+  slim until something lands on them, today's column is underlined, and each day carries a
+  struck-through foot of what finished that day. The toolbar arrows flip weeks and count the
+  live cards in the week you cannot see.
+- **Backlog**: quick-add lands in the Backlog, so a thought can be captured without deciding
+  when it happens. Channel-sheet picks still go straight to the current day. The Backlog never
+  nags — no age tint, no count badge.
+- **Moving cards**: pick a card up (long-press, or the hover grip on desktop) and tap a day to
+  place it; sibling tasks land with their issue. A bar with **Next day** / **Next week** /
+  **Backlog** buttons slides what is in hand, multi-select moves a set at once, and desktop
+  arrow keys slide a day (the view follows across the week boundary), walk rows, and Escape
+  puts the card down.
+- **Week rollover**: cards are never re-dated behind your back. On Monday the board asks once
+  what to do with unfinished cards from before this week: onto Monday, into the Backlog, or
+  leave them.
 - **Task cards**: every card is a task. One issue can fan out to several agents — add tasks from
   a card's detail screen or with `PROJ-142: fix the retry logic` in quick-add. Tasks sharing an
   issue render under an issue header (key, title, one status badge), reorder as a unit, archive
@@ -33,7 +43,8 @@ right. Complements a paper bullet journal; it never replaces the tracker or the 
 - **Channel dock**: the integrations live as icons at the board's right edge (Jira, GitHub,
   Linear). Each opens its sheet — assigned Jira issues, open PRs assigned to, created by, or
   awaiting review from you, or your assigned Linear issues. Items already on the board show as
-  added instead of duplicating. On phone the channels are buttons in the Today header.
+  added instead of duplicating. On phone the channels are buttons in the toolbar and the week
+  collapses to a day-chip strip.
 - **Undo window**: archiving a card or closing out an issue shows an undo bar for about
   eight seconds — the action a toast can't carry.
 - **Issue notes**: each issue (or PR) carries a memo that survives archiving — archive the
