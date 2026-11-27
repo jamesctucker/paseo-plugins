@@ -90,6 +90,8 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   // Above the breakpoint the rail gives up width first: full 340pt on wide
   // screens, shrinking toward 240pt before the layout stacks.
   const railWidth = Math.max(240, Math.min(340, Math.round(width * 0.36)));
+  /** Fold the live rail to a thin strip; the chevron at its top-right brings it back. */
+  const [railCollapsed, setRailCollapsed] = useState(false);
 
   const [openChannel, setOpenChannel] = useState<Channel | null>(null);
   /** The card picked up for a move (long-press, or the hover grip on desktop). */
@@ -879,7 +881,25 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
         )}
         {quickAddField}
       </View>
-      <View style={{ width: railWidth, borderLeftWidth: 1, borderLeftColor: theme.colors.border }}>{rail}</View>
+      <View style={{ width: railCollapsed ? 36 : railWidth, borderLeftWidth: 1, borderLeftColor: theme.colors.border }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={railCollapsed ? "Expand agents rail" : "Collapse agents rail"}
+          onPress={() => setRailCollapsed(!railCollapsed)}
+          hitSlop={6}
+          style={{
+            position: "absolute",
+            top: 12,
+            right: railCollapsed ? 0 : 8,
+            left: railCollapsed ? 0 : undefined,
+            alignItems: railCollapsed ? "center" : undefined,
+            zIndex: 10,
+          }}
+        >
+          <Icon name={railCollapsed ? "ChevronLeft" : "ChevronRight"} size={14} color={theme.colors.foregroundMuted} />
+        </Pressable>
+        {railCollapsed ? null : rail}
+      </View>
       <ChannelDock
         theme={theme}
         active={openChannel}

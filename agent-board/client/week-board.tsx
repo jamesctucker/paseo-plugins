@@ -3,7 +3,7 @@ import { Animated, Pressable, ScrollView, Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { BoardCard } from "../shared/settings";
-import { columnCards, doneOn, formatWeekRange, isWeekend, weekDays, weekStart, weekWidths, weekendOccupied } from "../shared/week";
+import { columnCards, dayLabel, doneOn, formatWeekRange, isWeekend, weekDays, weekStart, weekWidths, weekendOccupied } from "../shared/week";
 import { buildGroups, showHeader, type CardGroup } from "../shared/groups";
 import { Chip, monoFont, useReduceMotion } from "./ui";
 
@@ -379,8 +379,11 @@ export function ColumnBody({
       // Deliberately not role="button": cards inside are buttons, and a
       // button cannot wrap one. Rows already name the column for keyboard
       // and screen-reader users; this surface catches the empty space.
-      accessibilityElementsHidden
-      importantForAccessibility="no"
+      // While a card is in hand the surface is the only way to place it on
+      // an empty column, so it gets a name instead of staying hidden.
+      accessibilityElementsHidden={!droppable}
+      importantForAccessibility={droppable ? "yes" : "no"}
+      accessibilityLabel={droppable ? (day === null ? "Place card in Backlog" : `Place card on ${dayLabel(day)}`) : undefined}
       // Out of the tab order: this surface is mouse/touch only.
       tabIndex={-1}
       // Not `disabled` when nothing is in hand: RN-web would put
@@ -577,18 +580,22 @@ export function WeekGrid({
             style={{
               width: widths.backlog,
               height: HEADER_HEIGHT,
+              // Match DayHeader: a column container so flex-end pushes the
+              // text to the bottom; a row container would distribute
+              // horizontally and leave the text pinned to the top.
               justifyContent: "flex-end",
-              paddingHorizontal: 10,
+              paddingHorizontal: 8,
               paddingBottom: 4,
-              flexDirection: "row",
-              alignItems: "baseline",
-              gap: 6,
+              borderBottomWidth: 1,
+              borderBottomColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.foreground, fontSize: 11, fontWeight: "600", letterSpacing: 0.4 }}>Backlog</Text>
-            {backlog.length > 0 ? (
-              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{backlog.length} parked</Text>
-            ) : null}
+            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 5 }}>
+              <Text style={{ color: theme.colors.foreground, fontSize: 11, fontWeight: "600", letterSpacing: 0.4 }}>Backlog</Text>
+              {backlog.length > 0 ? (
+                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{backlog.length} parked</Text>
+              ) : null}
+            </View>
           </View>
           {days.map((day, index) => (
             <DayHeader
@@ -756,7 +763,7 @@ export function ColumnHeading({
   done: number;
 }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", paddingHorizontal: 12, paddingTop: 10, paddingBottom: 2, gap: 8 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", paddingHorizontal: 12, paddingTop: 8, paddingBottom: 4, gap: 8 }}>
       <Text style={{ color: theme.colors.foreground, fontSize: 11, fontWeight: "600", letterSpacing: 0.4 }}>{title}</Text>
       {subtitle ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{subtitle}</Text> : null}
       {done > 0 ? (
@@ -785,6 +792,7 @@ export function EmptyBoard({
       <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
         Capture below and it lands in the Backlog. Then pick a card up (long-press, or the grip on hover) and tap a day.
       </Text>
+      <EmptyDiagram theme={theme} />
       <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, paddingTop: 4 }}>
         <Pressable
           accessibilityRole="button"
@@ -802,6 +810,34 @@ export function EmptyBoard({
         >
           <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>New prompt card</Text>
         </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/** The core gesture in three boxes: a card leaves the Backlog and lands on Today. */
+function EmptyDiagram({ theme }: { theme: PluginTheme }) {
+  const column = {
+    width: 52,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    padding: 5,
+    gap: 4,
+  } as const;
+  const card = { height: 12, borderRadius: 3, backgroundColor: theme.colors.surface2 } as const;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14 }}>
+      <View style={column}>
+        <Text style={{ fontSize: 8, color: theme.colors.foregroundMuted }}>Backlog</Text>
+        <View style={card} />
+        <View style={{ ...card, backgroundColor: theme.colors.accent }} />
+        <View style={card} />
+      </View>
+      <Icon name="ChevronRight" size={16} color={theme.colors.foregroundMuted} />
+      <View style={{ ...column, borderColor: theme.colors.accent }}>
+        <Text style={{ fontSize: 8, color: theme.colors.foregroundMuted }}>Today</Text>
+        <View style={{ ...card, backgroundColor: theme.colors.accent }} />
       </View>
     </View>
   );

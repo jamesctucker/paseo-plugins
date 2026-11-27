@@ -6,7 +6,7 @@ import type { BoardCard } from "../shared/settings";
 import { formatElapsed } from "../shared/day";
 import { isDismissed } from "../shared/lanes";
 import { gateUrl, type Gate } from "../shared/gates";
-import { GroupLabel, LinkRow, PulseDot, attentionColor, monoFont } from "./ui";
+import { LinkRow, PulseDot, attentionColor, monoFont } from "./ui";
 import type { AgentEntry, PermissionRequestLite } from "./agent-directory";
 
 /**
@@ -79,6 +79,10 @@ export function Rail({
   onCompleteManualGate,
   onClearDoneNag,
 }: RailProps) {
+  // A collapsed section keeps its count on the label, so the quiet rail
+  // still answers "is anything running?" at a glance.
+  const [runningOpen, setRunningOpen] = useState(true);
+  const [reviewOpen, setReviewOpen] = useState(true);
   const { running, review } = useMemo(() => {
     const running: RailRowData[] = [];
     const review: RailRowData[] = [];
@@ -99,95 +103,143 @@ export function Rail({
 
   return (
     <View style={{ paddingHorizontal: 12, paddingVertical: 10, gap: 4 }}>
-      <GroupLabel theme={theme} text="Running" />
-      {running.length === 0 && !offline ? (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, paddingLeft: 2, paddingTop: 4 }}>
-          Nothing running.
-        </Text>
-      ) : (
-        running.map(({ agent, card, startedAt }) => (
-          <RailRow
-            key={agent.id}
-            theme={theme}
-            card={card}
-            color={theme.colors.accent}
-            pulse={true}
-            elapsed={startedAt ? formatElapsed(startedAt, now) : null}
-            onPress={() => onOpenAgent(agent.id)}
-            onOpenCard={() => onOpenCard(card.id)}
-            trailing={
-              canStop ? (
-                <StopControl
-                  theme={theme}
-                  pending={stoppingIds.has(agent.id)}
-                  onStop={() => onStop(agent.id)}
-                />
-              ) : null
-            }
-          />
-        ))
-      )}
-      {offline ? (
-        <Text style={{ color: theme.colors.statusWarning, fontSize: 11, paddingLeft: 2 }}>
-          Host offline, times may be stale.
-        </Text>
+      <SectionHeader theme={theme} text="Running" count={running.length} open={runningOpen} onToggle={() => setRunningOpen(!runningOpen)} />
+      {runningOpen ? (
+        <>
+          {running.length === 0 && !offline ? (
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, paddingLeft: 2, paddingTop: 4 }}>
+              Nothing running.
+            </Text>
+          ) : (
+            running.map(({ agent, card, startedAt }) => (
+              <RailRow
+                key={agent.id}
+                theme={theme}
+                card={card}
+                color={theme.colors.accent}
+                pulse={true}
+                elapsed={startedAt ? formatElapsed(startedAt, now) : null}
+                onPress={() => onOpenAgent(agent.id)}
+                onOpenCard={() => onOpenCard(card.id)}
+                trailing={
+                  canStop ? (
+                    <StopControl
+                      theme={theme}
+                      pending={stoppingIds.has(agent.id)}
+                      onStop={() => onStop(agent.id)}
+                    />
+                  ) : null
+                }
+              />
+            ))
+          )}
+          {offline ? (
+            <Text style={{ color: theme.colors.statusWarning, fontSize: 11, paddingLeft: 2 }}>
+              Host offline, times may be stale.
+            </Text>
+          ) : null}
+        </>
       ) : null}
       <View style={{ height: 14 }} />
-      <GroupLabel theme={theme} text="Review" />
-      {gates.length > 0 ? (
-        <View style={{ gap: 2, paddingTop: 2, paddingBottom: 6 }}>
-          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10, paddingLeft: 2, letterSpacing: 0.4 }}>
-            WAITING ON YOU
-          </Text>
-          {gates.map((gate) => (
-            <GateRow
-              key={gate.id}
-              theme={theme}
-              gate={gate}
-              onCompleteManualGate={onCompleteManualGate}
-              onClearDoneNag={onClearDoneNag}
-            />
-          ))}
-        </View>
+      <SectionHeader
+        theme={theme}
+        text="Review"
+        count={review.length + gates.length}
+        open={reviewOpen}
+        onToggle={() => setReviewOpen(!reviewOpen)}
+      />
+      {reviewOpen ? (
+        <>
+          {gates.length > 0 ? (
+            <View style={{ gap: 2, paddingTop: 2, paddingBottom: 6 }}>
+              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 10, paddingLeft: 2, letterSpacing: 0.4 }}>
+                WAITING ON YOU
+              </Text>
+              {gates.map((gate) => (
+                <GateRow
+                  key={gate.id}
+                  theme={theme}
+                  gate={gate}
+                  onCompleteManualGate={onCompleteManualGate}
+                  onClearDoneNag={onClearDoneNag}
+                />
+              ))}
+            </View>
+          ) : null}
+          {review.length === 0 && gates.length === 0 && !offline ? (
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, paddingLeft: 2, paddingTop: 4 }}>
+              Nothing to review.
+            </Text>
+          ) : (
+            review.map(({ agent, card }) => (
+              <View key={agent.id}>
+                <RailRow
+                  theme={theme}
+                  card={card}
+                  color={attentionColor(theme, agent.attentionReason)}
+                  label={railLabel(agent.attentionReason)}
+                  onPress={() => onOpenAgent(agent.id)}
+                  onOpenCard={() => onOpenCard(card.id)}
+                  trailing={
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Dismiss from board"
+                      onPress={() => onDismiss(agent.id, agent.updatedAt)}
+                      hitSlop={6}
+                    >
+                      <Icon name="X" size={12} color={theme.colors.foregroundMuted} />
+                    </Pressable>
+                  }
+                />
+                {agent.attentionReason === "permission" && agent.pendingPermissions.length > 0 ? (
+                  <PermissionBlock
+                    theme={theme}
+                    request={agent.pendingPermissions[0]}
+                    more={agent.pendingPermissions.length - 1}
+                    onRespond={(requestId, response) => onRespondPermission(agent.id, requestId, response)}
+                    onGoAnswer={() => onOpenAgent(agent.id)}
+                  />
+                ) : null}
+              </View>
+            ))
+          )}
+        </>
       ) : null}
-      {review.length === 0 && gates.length === 0 && !offline ? (
-        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, paddingLeft: 2, paddingTop: 4 }}>
-          Nothing to review.
-        </Text>
-      ) : (
-        review.map(({ agent, card }) => (
-          <View key={agent.id}>
-            <RailRow
-              theme={theme}
-              card={card}
-              color={attentionColor(theme, agent.attentionReason)}
-              label={railLabel(agent.attentionReason)}
-              onPress={() => onOpenAgent(agent.id)}
-              onOpenCard={() => onOpenCard(card.id)}
-              trailing={
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Dismiss from board"
-                  onPress={() => onDismiss(agent.id, agent.updatedAt)}
-                  hitSlop={6}
-                >
-                  <Icon name="X" size={12} color={theme.colors.foregroundMuted} />
-                </Pressable>
-              }
-            />
-            {agent.attentionReason === "permission" && agent.pendingPermissions.length > 0 ? (
-              <PermissionBlock
-                theme={theme}
-                request={agent.pendingPermissions[0]}
-                more={agent.pendingPermissions.length - 1}
-                onRespond={(requestId, response) => onRespondPermission(agent.id, requestId, response)}
-                onGoAnswer={() => onOpenAgent(agent.id)}
-              />
-            ) : null}
-          </View>
-        ))
-      )}
     </View>
+  );
+}
+
+/** A rail section's title: tap to fold the rows away, count kept when folded. */
+function SectionHeader({
+  theme,
+  text,
+  count,
+  open,
+  onToggle,
+}: {
+  theme: PluginTheme;
+  text: string;
+  count: number;
+  open: boolean;
+  onToggle(): void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      accessibilityLabel={open ? `Collapse ${text}` : `Expand ${text}`}
+      onPress={onToggle}
+      hitSlop={6}
+      style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 2 }}
+    >
+      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, fontWeight: "600", letterSpacing: 0.4 }}>{text}</Text>
+      {!open && count > 0 ? (
+        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{count}</Text>
+      ) : null}
+      <View style={{ transform: [{ rotate: open ? "0deg" : "180deg" }] }}>
+        <Icon name="ChevronDown" size={12} color={theme.colors.foregroundMuted} />
+      </View>
+    </Pressable>
   );
 }
 
