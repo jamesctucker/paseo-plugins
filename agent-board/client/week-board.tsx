@@ -3,19 +3,18 @@ import { Animated, Pressable, ScrollView, Text, View } from "react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import type { BoardCard } from "../shared/settings";
-import { columnCards, dayLabel, doneOn, formatWeekRange, isWeekend, weekDays, weekStart, weekWidths, weekendOccupied } from "../shared/week";
+import { columnCards, dayGridLayout, dayLabel, doneOn, focusedDayOffset, formatWeekRange, weekDays, weekStart } from "../shared/week";
 import { buildGroups, showHeader, type CardGroup } from "../shared/groups";
 import { Chip, monoFont, useReduceMotion } from "./ui";
 
 /**
- * The week board (amendment 2026-11-20): a backlog column and seven day
- * columns, Monday first, with today's column emphasized and the rest
- * slightly dimmed. Presentational: the screen that mounts it owns every
- * move, so nothing here touches the board document.
+ * The week board: seven equal-width days, Monday first, with three visible
+ * in a typical window and four on wide screens. Horizontal navigation reveals
+ * the rest instead of compressing cards. Today is emphasized and its siblings
+ * recede slightly. Presentational: the screen owns every move.
  *
- * Wide windows get the grid. Narrow ones stack: a strip of day chips stands
- * in for the columns and the chosen column renders as one list, so a phone
- * never sees seven columns across.
+ * Narrow layouts stack: a strip of day chips stands in for the grid and the
+ * chosen day renders as one list. Backlog lives in the utility side panel.
  */
 
 /** A tap inside a column. `rowIndex` names the row that was tapped; null is the column's empty space. */
@@ -76,19 +75,23 @@ export function WeekToolbar({
   theme,
   week,
   today,
+  focusedDay,
   prevCount,
   nextCount,
   trailing,
   onNavigate,
+  onNavigateDay,
   onThisWeek,
 }: {
   theme: PluginTheme;
   week: string;
   today: string;
+  focusedDay: string;
   prevCount: number;
   nextCount: number;
   trailing?: ReactNode;
   onNavigate(delta: number): void;
+  onNavigateDay(delta: number): void;
   onThisWeek(): void;
 }) {
   const current = weekStart(today) === week;
@@ -107,19 +110,25 @@ export function WeekToolbar({
       {/* "Go to" keeps the nav arrows' names clear of the MoveBar's slide
           actions, which are also "Next week" while a move is armed. */}
       <ToolbarButton theme={theme} label="Go to previous week" onPress={() => onNavigate(-1)}>
-        <Icon name="ChevronLeft" size={14} color={theme.colors.foreground} />
+        <Icon name="ChevronsLeft" size={14} color={theme.colors.foreground} />
         {prevCount > 0 ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{prevCount}</Text> : null}
       </ToolbarButton>
-      <ToolbarButton theme={theme} label="Go to next week" onPress={() => onNavigate(1)}>
-        {nextCount > 0 ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{nextCount}</Text> : null}
-        <Icon name="ChevronRight" size={14} color={theme.colors.foreground} />
+      <ToolbarButton theme={theme} label="Go to previous day" onPress={() => onNavigateDay(-1)}>
+        <Icon name="ChevronLeft" size={14} color={theme.colors.foreground} />
       </ToolbarButton>
       <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "600" }}>
         {current ? "This week" : formatWeekRange(week)}
       </Text>
       {current ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>{formatWeekRange(week)}</Text> : null}
-      {!current ? (
-        <Pressable accessibilityRole="button" accessibilityLabel="Back to this week" onPress={onThisWeek} hitSlop={6}>
+      <ToolbarButton theme={theme} label="Go to next day" onPress={() => onNavigateDay(1)}>
+        <Icon name="ChevronRight" size={14} color={theme.colors.foreground} />
+      </ToolbarButton>
+      <ToolbarButton theme={theme} label="Go to next week" onPress={() => onNavigate(1)}>
+        {nextCount > 0 ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{nextCount}</Text> : null}
+        <Icon name="ChevronsRight" size={14} color={theme.colors.foreground} />
+      </ToolbarButton>
+      {!current || focusedDay !== today ? (
+        <Pressable accessibilityRole="button" accessibilityLabel={current ? "Back to today" : "Back to this week"} onPress={onThisWeek} hitSlop={6}>
           <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>Today</Text>
         </Pressable>
       ) : null}
@@ -207,6 +216,62 @@ export function RolloverBanner({
   onAnswer(choice: "monday" | "backlog" | "leave"): void;
 }) {
   return (
+    <MovePrompt
+      theme={theme}
+      count={count}
+      scope="from before this week"
+      primaryLabel="To Monday"
+      primaryAccessibilityLabel="Move the unfinished cards onto Monday"
+      onPrimary={() => onAnswer("monday")}
+      onBacklog={() => onAnswer("backlog")}
+      onLeave={() => onAnswer("leave")}
+    />
+  );
+}
+
+export function CarryBanner({
+  theme,
+  count,
+  onAnswer,
+}: {
+  theme: PluginTheme;
+  count: number;
+  onAnswer(choice: "today" | "backlog" | "leave"): void;
+}) {
+  return (
+    <MovePrompt
+      theme={theme}
+      count={count}
+      scope="from earlier this week"
+      primaryLabel="Move to today"
+      primaryAccessibilityLabel="Move unfinished cards to today"
+      onPrimary={() => onAnswer("today")}
+      onBacklog={() => onAnswer("backlog")}
+      onLeave={() => onAnswer("leave")}
+    />
+  );
+}
+
+function MovePrompt({
+  theme,
+  count,
+  scope,
+  primaryLabel,
+  primaryAccessibilityLabel,
+  onPrimary,
+  onBacklog,
+  onLeave,
+}: {
+  theme: PluginTheme;
+  count: number;
+  scope: string;
+  primaryLabel: string;
+  primaryAccessibilityLabel: string;
+  onPrimary(): void;
+  onBacklog(): void;
+  onLeave(): void;
+}) {
+  return (
     <View
       style={{
         marginHorizontal: 12,
@@ -219,20 +284,20 @@ export function RolloverBanner({
         gap: 8,
       }}
     >
-      <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>{count} unfinished from before this week</Text>
+      <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>{count} unfinished {scope}</Text>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Move the unfinished cards onto Monday"
-          onPress={() => onAnswer("monday")}
+          accessibilityLabel={primaryAccessibilityLabel}
+          onPress={onPrimary}
           style={{ backgroundColor: theme.colors.accent, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 5 }}
         >
-          <Text style={{ color: theme.colors.accentForeground, fontSize: 12, fontWeight: "600" }}>To Monday</Text>
+          <Text style={{ color: theme.colors.accentForeground, fontSize: 12, fontWeight: "600" }}>{primaryLabel}</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Move the unfinished cards to the backlog"
-          onPress={() => onAnswer("backlog")}
+          onPress={onBacklog}
           style={{ backgroundColor: theme.colors.surface2, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 5 }}
         >
           <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>To backlog</Text>
@@ -240,7 +305,7 @@ export function RolloverBanner({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Leave the cards on their days"
-          onPress={() => onAnswer("leave")}
+          onPress={onLeave}
           style={{ paddingVertical: 5, paddingHorizontal: 4 }}
         >
           <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Leave them</Text>
@@ -256,27 +321,17 @@ export function DayStrip({
   week,
   today,
   selected,
-  backlogCount,
   onSelect,
 }: {
   theme: PluginTheme;
   week: string;
   today: string;
-  /** Null is the backlog. */
-  selected: string | null;
-  backlogCount: number;
-  onSelect(day: string | null): void;
+  selected: string;
+  onSelect(day: string): void;
 }) {
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 4 }}>
-        <StripChip
-          theme={theme}
-          label="Backlog"
-          aside={backlogCount > 0 ? `${backlogCount} parked` : null}
-          isSelected={selected === null}
-          onPress={() => onSelect(null)}
-        />
         {weekDays(week).map((day, index) => (
           <StripChip
             key={day}
@@ -544,9 +599,12 @@ export interface WeekGridProps {
   today: string;
   /** Every card; columns pick out their own. */
   cards: BoardCard[];
-  /** Width the grid may occupy; the grid scrolls horizontally below its minimum. */
+  /** Width the grid may occupy; three or four readable days fill the viewport. */
   available: number;
+  /** The day centered by day/week navigation and keyboard card moves. */
+  focusedDay: string;
   droppable: boolean;
+  onFocusDay(day: string): void;
   renderCard(card: BoardCard, options: RenderCardOptions): ReactNode;
   onArchiveAll(group: CardGroup): void;
   onOpenCard(cardId: string): void;
@@ -559,44 +617,35 @@ export function WeekGrid({
   today,
   cards,
   available,
+  focusedDay,
   droppable,
+  onFocusDay,
   renderCard,
   onArchiveAll,
   onOpenCard,
   onDrop,
 }: WeekGridProps) {
   const days = useMemo(() => weekDays(week), [week]);
-  const weekend = useMemo(() => weekendOccupied(cards, week), [cards, week]);
-  const widths = weekWidths(available, weekend);
-  const backlog = useMemo(() => columnCards(cards, null), [cards]);
-  // A weekend column stays slim until it holds something, then sizes up.
-  const widthOf = (day: string) => (isWeekend(day) && !weekend[day === days[6] ? 1 : 0] ? widths.slim : widths.day);
+  const layout = dayGridLayout(available);
+  const scroller = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    scroller.current?.scrollTo({ x: focusedDayOffset(days, focusedDay, layout), animated: false });
+  }, [days, focusedDay, layout.dayWidth, layout.visibleDays]);
 
   return (
-    <ScrollView horizontal style={{ flex: 1 }} contentContainerStyle={{ flexDirection: "row" }}>
-      <View style={{ width: widths.total }}>
+    <ScrollView
+      ref={scroller}
+      horizontal
+      style={{ flex: 1 }}
+      contentContainerStyle={{ flexDirection: "row", paddingRight: (layout.visibleDays - 1) * layout.dayWidth }}
+      onMomentumScrollEnd={(event) => {
+        const first = Math.max(0, Math.min(days.length - 1, Math.round(event.nativeEvent.contentOffset.x / layout.dayWidth)));
+        onFocusDay(days[first]);
+      }}
+    >
+      <View style={{ width: layout.total }}>
         <View style={{ flexDirection: "row", height: HEADER_HEIGHT }}>
-          <View
-            style={{
-              width: widths.backlog,
-              height: HEADER_HEIGHT,
-              // Match DayHeader: a column container so flex-end pushes the
-              // text to the bottom; a row container would distribute
-              // horizontally and leave the text pinned to the top.
-              justifyContent: "flex-end",
-              paddingHorizontal: 8,
-              paddingBottom: 4,
-              borderBottomWidth: 1,
-              borderBottomColor: theme.colors.border,
-            }}
-          >
-            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 5 }}>
-              <Text style={{ color: theme.colors.foreground, fontSize: 11, fontWeight: "600", letterSpacing: 0.4 }}>Backlog</Text>
-              {backlog.length > 0 ? (
-                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{backlog.length} parked</Text>
-              ) : null}
-            </View>
-          </View>
           {days.map((day, index) => (
             <DayHeader
               key={day}
@@ -604,33 +653,20 @@ export function WeekGrid({
               day={day}
               weekday={WEEKDAYS[index]}
               isToday={day === today}
-              width={widthOf(day)}
+              width={layout.dayWidth}
               done={doneOn(cards, day).length}
             />
           ))}
         </View>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }}>
           <View style={{ flexDirection: "row", alignItems: "stretch" }}>
-            <Column
-              theme={theme}
-              cards={cards}
-              day={null}
-              width={widths.backlog}
-              droppable={droppable}
-              emphasized={false}
-              dimmed={false}
-              renderCard={renderCard}
-              onArchiveAll={onArchiveAll}
-              onOpenCard={onOpenCard}
-              onDrop={onDrop}
-            />
             {days.map((day) => (
               <Column
                 key={day}
                 theme={theme}
                 cards={cards}
                 day={day}
-                width={widthOf(day)}
+                width={layout.dayWidth}
                 droppable={droppable}
                 emphasized={day === today}
                 // Today is the glance's landing spot; its siblings recede a step.
@@ -665,20 +701,9 @@ function DayHeader({
 }) {
   const date = day.slice(8);
   const tint = isToday ? theme.colors.foreground : theme.colors.foregroundMuted;
-  const border = { borderLeftWidth: 1, borderLeftColor: theme.colors.border };
-  if (width <= 44) {
-    // Slim weekend: a date tab, still a place a card can land.
-    return (
-      <View style={{ ...border, width, height: HEADER_HEIGHT, alignItems: "center", justifyContent: "flex-end", paddingBottom: 4 }}>
-        <Text style={{ color: tint, fontSize: 9, fontWeight: "600", letterSpacing: 0.3 }}>{isToday ? "Today" : weekday}</Text>
-        <Text style={{ color: tint, fontSize: 10 }}>{date}</Text>
-      </View>
-    );
-  }
   return (
     <View
       style={{
-        ...border,
         width,
         height: HEADER_HEIGHT,
         justifyContent: "flex-end",
@@ -714,7 +739,7 @@ function Column({
   onArchiveAll,
   onOpenCard,
   onDrop,
-}: Omit<WeekGridProps, "week" | "today" | "available"> & {
+}: Omit<WeekGridProps, "week" | "today" | "available" | "focusedDay" | "onFocusDay"> & {
   day: string | null;
   width: number;
   emphasized: boolean;
@@ -727,8 +752,6 @@ function Column({
     <View
       style={{
         width,
-        borderLeftWidth: 1,
-        borderLeftColor: theme.colors.border,
         opacity: dimmed ? 0.8 : 1,
       }}
     >
@@ -737,7 +760,7 @@ function Column({
         day={day}
         live={live}
         done={done}
-        dense
+        dense={false}
         droppable={droppable}
         cleared={cleared}
         renderCard={renderCard}

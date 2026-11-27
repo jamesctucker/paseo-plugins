@@ -7,7 +7,7 @@ import { Icon, useToast } from "@getpaseo/plugin/client/ui";
 import { boardCapabilitiesRpc, boardStopRpc, githubGetRpc, issueSearchRpc, linearSearchRpc } from "../shared/contracts";
 import { newCardId, type BoardCard } from "../shared/settings";
 import { localDay } from "../shared/day";
-import { addDays, beforeThisWeek, columnCards, dayLabel, doneOn, liveInWeek, moveCardsToDay, nudgeCards, nudgedDay, weekDays, weekStart } from "../shared/week";
+import { addDays, beforeThisWeek, columnCards, dayLabel, doneOn, earlierThisWeek, liveInWeek, moveCardsToDay, nudgeCards, nudgedDay, weekDays, weekStart } from "../shared/week";
 import { parseQuickAdd } from "../shared/tracker";
 import { buildGroups, insertAtGroupEnd, isDuplicate, neighborIndex, placeCard, type CardGroup } from "../shared/groups";
 import { recordArchive, type ArchiveUndo } from "../shared/undo";
@@ -20,13 +20,15 @@ import { useBoardDoc } from "./board-doc";
 import { agentMatchText, linkSuggestions } from "../shared/links";
 import { useGates } from "./gates";
 import { CardRow } from "./card-row";
-import { ChannelDock, type Channel } from "./dock";
-import { Rail, type PermissionResponse } from "./rail";
+import { UtilityRail, type Channel, type UtilityPanel } from "./dock";
+import { partitionRailRows, Rail, type PermissionResponse } from "./rail";
+import { BacklogPanel, SidePanel } from "./side-panel";
 import { QuickAdd } from "./quick-add";
 import { JiraSheet } from "./jira-sheet";
 import { GitHubSheet } from "./github-sheet";
 import { LinearSheet } from "./linear-sheet";
 import {
+  CarryBanner,
   ColumnBody,
   ColumnHeading,
   DayStrip,
@@ -41,23 +43,15 @@ import {
 } from "./week-board";
 
 /**
- * The board: the week on the left, the live rail on the right, and a narrow
- * channel dock at the far edge where the integrations live.
+ * The board: readable day columns in the center and a persistent utility rail
+ * at the far right. Backlog and Agents share one docked panel on desktop and
+ * an overlay drawer on compact screens, so supporting work never squeezes the
+ * week into seven narrow columns.
  *
- * The week (amendment 2026-11-20) is a backlog column plus seven day
- * columns. Quick-add captures into the backlog; putting a card on a day is
- * the planning ritual, and it works three ways — pick a card up and tap a
- * column, slide it with the bar's buttons or the arrow keys, or select
- * several and move them together. Nothing moves between days on its own:
- * unfinished work stays where it was planned until the once-a-week rollover
- * prompt.
- *
- * Three width tiers, because the host's compact flag only covers phones:
- * wide desktop gets the grid and a 340pt rail, mid windows shrink the rail
- * before the grid, and below 720pt the board stacks — a chip strip stands in
- * for the columns, the chosen column renders as one list, and the rail
- * follows it. Cards render from the cached document even while the host is
- * unreachable.
+ * Quick-add captures into the Backlog. Putting a card on a day works by
+ * tap-to-place, MoveBar slides, arrow keys, or multi-select. Nothing moves
+ * between days on its own: unfinished work waits for a weekly rollover or
+ * daily carry answer. Cards render from cache while the host is unreachable.
  */
 
 export interface BoardScreenProps extends PluginScreenProps {
@@ -87,12 +81,9 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   // the same wall, so the board keeps its own breakpoint. Below it the rail
   // would eat the whole row (340 + 48 fixed against a flex board column).
   const stacked = layout.compact || width < 720;
-  // Above the breakpoint the rail gives up width first: full 340pt on wide
-  // screens, shrinking toward 240pt before the layout stacks.
-  const railWidth = Math.max(240, Math.min(340, Math.round(width * 0.36)));
-  /** Fold the live rail to a thin strip; the chevron at its top-right brings it back. */
-  const [railCollapsed, setRailCollapsed] = useState(false);
-
+  // The supporting panel docks on desktop; compact layouts overlay it instead.
+  const panelWidth = Math.max(280, Math.min(340, Math.round(width * 0.28)));
+  const [openPanel, setOpenPanel] = useState<UtilityPanel | null>(null);
   const [openChannel, setOpenChannel] = useState<Channel | null>(null);
   /** The card picked up for a move (long-press, or the hover grip on desktop). */
   const [reorderId, setReorderId] = useState<string | null>(null);
@@ -104,8 +95,10 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   const [selectMode, setSelectMode] = useState(false);
   /** Monday of the visible week. Null follows today, so the view rolls over on its own. */
   const [viewWeek, setViewWeek] = useState<string | null>(null);
-  /** The stacked layout's chosen column. Undefined follows today; null is the backlog. */
-  const [stripDay, setStripDay] = useState<string | null | undefined>(undefined);
+  /** The stacked layout's chosen day. Undefined follows today. */
+  const [stripDay, setStripDay] = useState<string | undefined>(undefined);
+  /** The grid's navigation focus. Null follows today. */
+  const [gridDay, setGridDay] = useState<string | null>(null);
   /** The grid's measured width; 0 until the first layout pass. */
   const [boardWidth, setBoardWidth] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -197,9 +190,11 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   }
 
   const week = viewWeek ?? weekStart(today);
+  const focusedDay = gridDay ?? today;
   const days = useMemo(() => weekDays(week), [week]);
-  /** Every live card, whichever column it is in: the rail follows agents from any day. */
+  /** Every live card, whichever column it is in: Agents follows work from any day. */
   const live = useMemo(() => cards.filter((card) => !card.archivedAt), [cards]);
+  const railRows = useMemo(() => partitionRailRows(live, agents, board.values.dismissedAttention), [live, agents, board.values.dismissedAttention]);
   const backlog = useMemo(() => columnCards(cards, null), [cards]);
   const byDay = useMemo(() => new Map(days.map((day) => [day, columnCards(cards, day)] as const)), [cards, days]);
   const doneByDay = useMemo(() => new Map(days.map((day) => [day, doneOn(cards, day)] as const)), [cards, days]);
@@ -212,6 +207,9 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
 
   const earlier = useMemo(() => beforeThisWeek(cards, today), [cards, today]);
   const needRollover = earlier.length > 0 && board.values.rolloverAnsweredWeek !== weekStart(today);
+  const carry = useMemo(() => earlierThisWeek(cards, today), [cards, today]);
+  // One prompt at a time: last week's rollover takes precedence over today's carry.
+  const needCarry = !needRollover && carry.length > 0 && board.values.carryAnsweredDay !== today;
   const inHand = reorderId !== null || selected.size > 0;
   // A week you cannot see should not look empty: the arrows count its live cards.
   const prevWeekCount = liveInWeek(cards, addDays(week, -7));
@@ -503,6 +501,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
       if (!saved) return;
       const away = landed.filter((day) => weekStart(day) !== week);
       if (reorderId) {
+        setGridDay(landed[0]);
         if (away.length === landed.length) setViewWeek(weekStart(away[0]));
         return;
       }
@@ -518,17 +517,32 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     regainMoveKeys();
     const next = addDays(week, deltaWeeks * 7);
     setViewWeek(next);
+    setGridDay(addDays(focusedDay, deltaWeeks * 7));
     // The stacked layout keeps its weekday when it flips weeks.
-    setStripDay((current) => (typeof current === "string" ? addDays(current, deltaWeeks * 7) : next));
+    setStripDay((current) => (current ? addDays(current, deltaWeeks * 7) : next));
+  }
+
+  function navigateDay(deltaDays: number) {
+    regainMoveKeys();
+    const next = addDays(stacked ? (stripDay ?? today) : focusedDay, deltaDays);
+    setViewWeek(weekStart(next));
+    setGridDay(next);
+    setStripDay(next);
   }
 
   function showThisWeek() {
     regainMoveKeys();
     setViewWeek(null);
+    setGridDay(null);
     setStripDay(undefined);
   }
 
-  function pickStripDay(day: string | null) {
+  function togglePanel(panel: UtilityPanel) {
+    regainMoveKeys();
+    setOpenPanel((current) => (current === panel ? null : panel));
+  }
+
+  function pickStripDay(day: string) {
     // With something in hand the chips are drop targets, not navigation.
     if (inHand) placeAt(day, null);
     else setStripDay(day);
@@ -536,6 +550,11 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
 
   async function handleRollover(choice: "monday" | "backlog" | "leave") {
     const reason = await board.answerRollover(choice);
+    if (reason) setError(`Couldn't save — ${reason}`);
+  }
+
+  async function handleCarry(choice: "today" | "backlog" | "leave") {
+    const reason = await board.answerCarry(choice);
     if (reason) setError(`Couldn't save — ${reason}`);
   }
 
@@ -637,25 +656,6 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
     );
   }
 
-  const channelButton = (channel: Channel, label: string) => (
-    <Pressable
-      key={channel}
-      accessibilityRole="button"
-      accessibilityLabel={`Add from ${label}`}
-      onPress={() => setOpenChannel(channel)}
-      style={{
-        backgroundColor: theme.colors.surface1,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        borderRadius: 8,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-      }}
-    >
-      <Text style={{ color: theme.colors.foreground, fontSize: 12, fontWeight: "600" }}>{label}</Text>
-    </Pressable>
-  );
-
   const selectButton = (
     <ToolbarButton theme={theme} label={selectMode ? "Stop selecting" : "Select cards"} onPress={toggleSelectMode}>
       <Icon
@@ -678,6 +678,7 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
   const notices = (
     <>
       {needRollover ? <RolloverBanner theme={theme} count={earlier.length} onAnswer={handleRollover} /> : null}
+      {needCarry ? <CarryBanner theme={theme} count={carry.length} onAnswer={handleCarry} /> : null}
       {archiveUndo ? <ArchiveUndoBar theme={theme} undo={archiveUndo} onUndo={runUndo} /> : null}
       {movingCard ? (
         <MoveBar
@@ -789,66 +790,112 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
       theme={theme}
       week={week}
       today={today}
+      focusedDay={stacked ? (stripDay ?? today) : focusedDay}
       prevCount={prevWeekCount}
       nextCount={nextWeekCount}
       onNavigate={navigate}
+      onNavigateDay={navigateDay}
       onThisWeek={showThisWeek}
-      trailing={
-        <>
-          {stacked ? channelButton("jira", "Jira") : null}
-          {stacked ? channelButton("github", "GitHub") : null}
-          {stacked ? channelButton("linear", "Linear") : null}
-          {selectButton}
-        </>
+      trailing={selectButton}
+    />
+  );
+
+  const supportingPanel = openPanel ? (
+    <View
+      style={
+        stacked
+          ? {
+              position: "absolute" as const,
+              top: 0,
+              bottom: 0,
+              left: 0,
+              right: 48,
+              zIndex: 20,
+              backgroundColor: theme.colors.surface0,
+              borderLeftWidth: 1,
+              borderLeftColor: theme.colors.border,
+            }
+          : { width: panelWidth, borderLeftWidth: 1, borderLeftColor: theme.colors.border }
       }
+    >
+      {openPanel === "backlog" ? (
+        <BacklogPanel
+          theme={theme}
+          cards={backlog}
+          droppable={inHand}
+          renderCard={renderCard}
+          onArchiveAll={archiveGroup}
+          onOpenCard={onOpenCard}
+          onDrop={() => placeAt(null, null)}
+          onClose={() => setOpenPanel(null)}
+        />
+      ) : (
+        <SidePanel
+          theme={theme}
+          title="Agents"
+          subtitle={`${railRows.running.length} running · ${railRows.review.length + gatesApi.gates.length} to review`}
+          onClose={() => setOpenPanel(null)}
+        >
+          <ScrollView style={{ flex: 1 }}>{rail}</ScrollView>
+        </SidePanel>
+      )}
+    </View>
+  ) : null;
+
+  const utilityRail = (
+    <UtilityRail
+      theme={theme}
+      activePanel={openPanel}
+      activeChannel={openChannel}
+      backlogCount={backlog.length}
+      runningCount={railRows.running.length}
+      reviewCount={railRows.review.length + gatesApi.gates.length}
+      onOpenPanel={togglePanel}
+      onOpenChannel={(channel) => setOpenChannel(openChannel === channel ? null : channel)}
     />
   );
 
   if (stacked) {
-    const shownDay = stripDay === undefined ? today : stripDay;
-    const shownLive = shownDay === null ? backlog : byDay.get(shownDay) ?? [];
-    const shownDone = shownDay === null ? [] : doneByDay.get(shownDay) ?? [];
+    const shownDay = stripDay ?? today;
+    const shownLive = byDay.get(shownDay) ?? [];
+    const shownDone = doneByDay.get(shownDay) ?? [];
     return (
-      <View style={{ flex: 1, backgroundColor: theme.colors.surface0 }}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }}>
-          {toolbar}
-          {notices}
-          {firstRun ? (
-            emptyBoard
-          ) : (
-            <>
-              <DayStrip
-                theme={theme}
-                week={week}
-                today={today}
-                selected={shownDay}
-                backlogCount={backlog.length}
-                onSelect={pickStripDay}
-              />
-              <ColumnHeading
-                theme={theme}
-                title={shownDay === null ? "Backlog" : shownDay === today ? "Today" : dayLabel(shownDay)}
-                subtitle={shownDay === null && backlog.length > 0 ? `${backlog.length} parked` : shownDay === today ? dayLabel(today) : null}
-                done={shownDone.length}
-              />
-              <ColumnBody
-                theme={theme}
-                day={shownDay}
-                live={shownLive}
-                done={shownDone}
-                dense={false}
-                droppable={inHand}
-                cleared={shownDay === today && shownLive.length === 0 && shownDone.length > 0 ? { done: shownDone.length } : null}
-                renderCard={renderCard}
-                onArchiveAll={archiveGroup}
-                onOpenCard={onOpenCard}
-                onDrop={(day) => placeAt(day, null)}
-              />
-            </>
-          )}
-          {rail}
-        </ScrollView>
-        {quickAddField}
+      <View style={{ flex: 1, backgroundColor: theme.colors.surface0, flexDirection: "row" }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }}>
+            {toolbar}
+            {notices}
+            {firstRun ? (
+              emptyBoard
+            ) : (
+              <>
+                <DayStrip theme={theme} week={week} today={today} selected={shownDay} onSelect={pickStripDay} />
+                <ColumnHeading
+                  theme={theme}
+                  title={shownDay === today ? "Today" : dayLabel(shownDay)}
+                  subtitle={shownDay === today ? dayLabel(today) : null}
+                  done={shownDone.length}
+                />
+                <ColumnBody
+                  theme={theme}
+                  day={shownDay}
+                  live={shownLive}
+                  done={shownDone}
+                  dense={false}
+                  droppable={inHand}
+                  cleared={shownDay === today && shownLive.length === 0 && shownDone.length > 0 ? { done: shownDone.length } : null}
+                  renderCard={renderCard}
+                  onArchiveAll={archiveGroup}
+                  onOpenCard={onOpenCard}
+                  onDrop={(day) => placeAt(day, null)}
+                />
+              </>
+            )}
+          </ScrollView>
+          {quickAddField}
+        </View>
+        {supportingPanel}
+        {utilityRail}
         {sheets}
       </View>
     );
@@ -872,7 +919,9 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
             today={today}
             cards={cards}
             available={Math.max(boardWidth - 8, 0)}
+            focusedDay={focusedDay}
             droppable={inHand}
+            onFocusDay={setGridDay}
             renderCard={renderCard}
             onArchiveAll={archiveGroup}
             onOpenCard={onOpenCard}
@@ -881,30 +930,8 @@ export function BoardScreen({ theme, layout, navigation, onOpenSettings, onOpenC
         )}
         {quickAddField}
       </View>
-      <View style={{ width: railCollapsed ? 36 : railWidth, borderLeftWidth: 1, borderLeftColor: theme.colors.border }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={railCollapsed ? "Expand agents rail" : "Collapse agents rail"}
-          onPress={() => setRailCollapsed(!railCollapsed)}
-          hitSlop={6}
-          style={{
-            position: "absolute",
-            top: 12,
-            right: railCollapsed ? 0 : 8,
-            left: railCollapsed ? 0 : undefined,
-            alignItems: railCollapsed ? "center" : undefined,
-            zIndex: 10,
-          }}
-        >
-          <Icon name={railCollapsed ? "ChevronLeft" : "ChevronRight"} size={14} color={theme.colors.foregroundMuted} />
-        </Pressable>
-        {railCollapsed ? null : rail}
-      </View>
-      <ChannelDock
-        theme={theme}
-        active={openChannel}
-        onOpen={(channel) => setOpenChannel(openChannel === channel ? null : channel)}
-      />
+      {supportingPanel}
+      {utilityRail}
       {sheets}
     </View>
   );

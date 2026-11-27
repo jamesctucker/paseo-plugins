@@ -4,7 +4,7 @@ import { usePaseo, useRpc, useSettings } from "@getpaseo/plugin/client";
 import type { SettingsState } from "@getpaseo/plugin/client";
 import { boardDoc, type BoardCard, type BoardValues } from "../shared/settings";
 import { localDay } from "../shared/day";
-import { rollover, weekStart } from "../shared/week";
+import { carryForward, rollover, weekStart } from "../shared/week";
 import { declineKey } from "../shared/links";
 import type { AgentEntry } from "./agent-directory";
 
@@ -41,6 +41,8 @@ export interface BoardDoc {
   updateCards(transform: (cards: BoardCard[]) => BoardCard[]): Promise<string | null>;
   /** Answer the weekly rollover; null when saved, the host's rejection reason otherwise. */
   answerRollover(choice: "monday" | "backlog" | "leave"): Promise<string | null>;
+  /** Answer the daily carry-forward prompt for earlier days in this week. */
+  answerCarry(choice: "today" | "backlog" | "leave"): Promise<string | null>;
   dismissAttention(agentId: string, stamp: string): Promise<boolean>;
   addManualGate(text: string): Promise<string | null>;
   removeManualGate(id: string): Promise<string | null>;
@@ -63,6 +65,7 @@ export function useBoardDoc(): BoardDoc {
   const lastGood = useRef<BoardValues>({
     cards: [],
     rolloverAnsweredWeek: "",
+    carryAnsweredDay: "",
     cardNotes: {},
     dismissedAttention: {},
     manualGates: {},
@@ -158,6 +161,18 @@ export function useBoardDoc(): BoardDoc {
         ...current,
         cards: rollover(current.cards, choice, today),
         rolloverAnsweredWeek: weekStart(today),
+      }));
+    },
+    [mutate],
+  );
+
+  const answerCarry = useCallback(
+    async (choice: "today" | "backlog" | "leave") => {
+      const today = localDay(new Date());
+      return mutate((current) => ({
+        ...current,
+        cards: carryForward(current.cards, choice, today),
+        carryAnsweredDay: today,
       }));
     },
     [mutate],
@@ -262,6 +277,7 @@ export function useBoardDoc(): BoardDoc {
     saveCards,
     updateCards,
     answerRollover,
+    answerCarry,
     dismissAttention,
     addManualGate,
     removeManualGate,

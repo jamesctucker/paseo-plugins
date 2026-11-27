@@ -7,7 +7,7 @@ import type { BoardCard } from "./settings";
  * `day` is its column — null is the backlog, a date is that day in any week.
  * Unfinished cards stay where they were planned (week-honest history, no
  * daily auto-carry), finished cards sit at the foot of the day they were
- * finished, and the only automatic move is the once-a-week rollover prompt.
+ * finished. Moves wait for the weekly rollover or daily carry-forward answer.
  * Pure string dates (`YYYY-MM-DD`, local) so the logic stays testable
  * without a clock; callers pass `localDay(new Date())` in prod.
  */
@@ -35,11 +35,6 @@ export function weekStart(day: string): string {
 /** Monday through Sunday of the week that starts on `start`. */
 export function weekDays(start: string): string[] {
   return WEEKDAYS.map((_, index) => addDays(start, index));
-}
-
-export function isWeekend(day: string): boolean {
-  const weekday = dateOfDay(day).getDay();
-  return weekday === 0 || weekday === 6;
 }
 
 /** "Thu Nov 26" — the day label used by move confirmations and drop targets. */
@@ -76,6 +71,12 @@ export function doneOn(cards: readonly BoardCard[], day: string): BoardCard[] {
 export function beforeThisWeek(cards: readonly BoardCard[], today: string): BoardCard[] {
   const start = weekStart(today);
   return cards.filter((card) => !card.archivedAt && card.day !== null && card.day < start);
+}
+
+/** Unfinished cards on earlier days of this week, the daily carry-forward prompt's candidates. */
+export function earlierThisWeek(cards: readonly BoardCard[], today: string): BoardCard[] {
+  const start = weekStart(today);
+  return cards.filter((card) => !card.archivedAt && card.day !== null && card.day >= start && card.day < today);
 }
 
 /** Live cards planned inside the week that starts on `start`. */
@@ -124,6 +125,13 @@ export function rollover(cards: readonly BoardCard[], choice: "monday" | "backlo
   return moveCardsToDay(cards, ids, choice === "monday" ? weekStart(today) : null);
 }
 
+/** The daily carry answer only touches earlier days in this week; last week's Leave stays left. */
+export function carryForward(cards: readonly BoardCard[], choice: "today" | "backlog" | "leave", today: string): BoardCard[] {
+  if (choice === "leave") return [...cards];
+  const ids = new Set(earlierThisWeek(cards, today).map((card) => card.id));
+  return moveCardsToDay(cards, ids, choice === "today" ? today : null);
+}
+
 /**
  * Where a nudge lands. The backlog has no weekday of its own, so an undated
  * card nudges from today — and never backwards, since "yesterday" is not a
@@ -158,40 +166,23 @@ export function siblingDay(source: BoardCard, today: string): string | null {
   return today;
 }
 
-/**
- * Column widths for the week grid. Weekend columns stay slim until they
- * hold a card, then size up to a weekday; the result may exceed the
- * available width, which is the horizontal scroll's cue.
- */
-export interface WeekWidths {
-  backlog: number;
-  day: number;
-  slim: number;
+/** A readable day viewport: three columns, or four once each can be 300pt wide. */
+export interface DayGridLayout {
+  dayWidth: number;
+  visibleDays: number;
   total: number;
 }
 
-const BACKLOG_WIDTH = { min: 140, max: 232, share: 0.18 };
-const DAY_WIDTH = { min: 112, max: 260 };
-export const SLIM_WEEKEND_WIDTH = 30;
+const MIN_DAY_WIDTH = 280;
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
+export function dayGridLayout(available: number): DayGridLayout {
+  const visibleDays = available >= 1200 ? 4 : 3;
+  const dayWidth = Math.max(MIN_DAY_WIDTH, Math.floor(available / visibleDays));
+  return { dayWidth, visibleDays, total: dayWidth * 7 };
 }
 
-export function weekWidths(available: number, weekend: readonly [boolean, boolean]): WeekWidths {
-  const backlog = clamp(Math.round(available * BACKLOG_WIDTH.share), BACKLOG_WIDTH.min, BACKLOG_WIDTH.max);
-  const fullDays = 5 + weekend.filter(Boolean).length;
-  const slimDays = 7 - fullDays;
-  const day = clamp(Math.floor((available - backlog - slimDays * SLIM_WEEKEND_WIDTH) / fullDays), DAY_WIDTH.min, DAY_WIDTH.max);
-  return { backlog, day, slim: SLIM_WEEKEND_WIDTH, total: backlog + fullDays * day + slimDays * SLIM_WEEKEND_WIDTH };
-}
-
-/**
- * Which weekend columns of the week starting on `start` hold anything: a
- * card planned there, or one finished there (which renders at its foot).
- */
-export function weekendOccupied(cards: readonly BoardCard[], start: string): [boolean, boolean] {
-  const holds = (day: string) =>
-    cards.some((card) => card.day === day || (card.archivedAt !== null && localDay(new Date(card.archivedAt)) === day));
-  return [holds(addDays(start, 5)), holds(addDays(start, 6))];
+/** Put the focused day first. The scroller adds end-space so Sunday can lead too. */
+export function focusedDayOffset(days: readonly string[], focusedDay: string, layout: DayGridLayout): number {
+  const index = days.indexOf(focusedDay);
+  return index < 0 ? 0 : index * layout.dayWidth;
 }

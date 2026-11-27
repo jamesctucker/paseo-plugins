@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   addDays,
   beforeThisWeek,
+  carryForward,
   columnCards,
+  dayGridLayout,
   dayLabel,
   doneOn,
+  earlierThisWeek,
   formatWeekRange,
-  isWeekend,
+  focusedDayOffset,
   liveInWeek,
   moveCardsToDay,
   nudgeCards,
@@ -14,9 +17,7 @@ import {
   siblingDay,
   weekDays,
   weekStart,
-  weekWidths,
   rollover,
-  weekendOccupied,
 } from "../shared/week";
 import type { BoardCard } from "../shared/settings";
 
@@ -66,15 +67,6 @@ describe("weekStart", () => {
 describe("weekDays", () => {
   it("runs Monday through Sunday", () => {
     expect(weekDays("2026-11-30")).toEqual(["2026-11-30", "2026-12-01", "2026-12-02", "2026-12-03", "2026-12-04", "2026-12-05", "2026-12-06"]);
-  });
-});
-
-describe("isWeekend", () => {
-  it("flags Saturday and Sunday only", () => {
-    expect(isWeekend("2026-11-28")).toBe(true);
-    expect(isWeekend("2026-11-29")).toBe(true);
-    expect(isWeekend("2026-11-27")).toBe(false);
-    expect(isWeekend("2026-11-23")).toBe(false);
   });
 });
 
@@ -141,6 +133,35 @@ describe("rollover", () => {
   it("leaves the board untouched when declined", () => {
     const cards = [card("last-week", { day: "2026-11-20" })];
     expect(rollover(cards, "leave", today)[0]).toBe(cards[0]);
+  });
+});
+
+describe("daily carry-forward", () => {
+  const today = "2026-11-27";
+  const cards = [
+    card("last-week", { day: "2026-11-22" }),
+    card("monday", { day: "2026-11-23" }),
+    card("thursday", { day: "2026-11-26" }),
+    card("today", { day: today }),
+    card("done", { day: "2026-11-26", archivedAt: archivedAt("2026-11-26") }),
+    card("backlog"),
+  ];
+
+  it("offers only unfinished cards from earlier days of this week", () => {
+    expect(earlierThisWeek(cards, today).map((card) => card.id)).toEqual(["monday", "thursday"]);
+  });
+
+  it("moves those cards to today without touching last week's Leave", () => {
+    const next = carryForward(cards, "today", today);
+    expect(next.find((card) => card.id === "monday")?.day).toBe(today);
+    expect(next.find((card) => card.id === "thursday")?.day).toBe(today);
+    expect(next.find((card) => card.id === "last-week")?.day).toBe("2026-11-22");
+    expect(next.find((card) => card.id === "backlog")?.day).toBeNull();
+  });
+
+  it("can park them or leave them in place", () => {
+    expect(carryForward(cards, "backlog", today).find((card) => card.id === "thursday")?.day).toBeNull();
+    expect(carryForward(cards, "leave", today).find((card) => card.id === "thursday")?.day).toBe("2026-11-26");
   });
 });
 
@@ -240,48 +261,42 @@ describe("siblingDay", () => {
   });
 });
 
-describe("weekWidths", () => {
-  it("sizes five weekdays, the backlog, and two slim weekend columns to fit", () => {
-    const widths = weekWidths(1051, [false, false]);
-    expect(widths).toMatchObject({ backlog: 189, day: 160, slim: 30 });
-    expect(widths.total).toBeLessThanOrEqual(1051);
+describe("dayGridLayout", () => {
+  it("shows three readable days in a typical window", () => {
+    expect(dayGridLayout(1051)).toEqual({ dayWidth: 350, visibleDays: 3, total: 2450 });
   });
 
-  it("gives an occupied weekend column a weekday's width", () => {
-    const widths = weekWidths(1051, [true, false]);
-    expect(widths.day).toBe(138);
-    expect(widths.total).toBe(189 + 6 * 138 + 30);
+  it("widens to four days only when each can be at least 300pt", () => {
+    expect(dayGridLayout(1199).visibleDays).toBe(3);
+    expect(dayGridLayout(1200)).toEqual({ dayWidth: 300, visibleDays: 4, total: 2100 });
   });
 
-  it("refuses to squeeze weekdays below the readable minimum and lets the grid scroll", () => {
-    const widths = weekWidths(891, [true, true]);
-    expect(widths.day).toBe(112);
-    expect(widths.total).toBeGreaterThan(891);
-  });
-
-  it("stops growing on very wide screens", () => {
-    const widths = weekWidths(2400, [false, false]);
-    expect(widths.day).toBe(260);
-    expect(widths.backlog).toBe(232);
-    expect(widths.total).toBeLessThan(2400);
+  it("scrolls rather than squeezing columns below 280pt", () => {
+    const layout = dayGridLayout(600);
+    expect(layout.dayWidth).toBe(280);
+    expect(layout.total).toBeGreaterThan(600);
   });
 
   it("keeps a usable shape before the board has been measured", () => {
-    const widths = weekWidths(0, [false, false]);
-    expect(widths.backlog).toBe(140);
-    expect(widths.day).toBe(112);
+    expect(dayGridLayout(0)).toEqual({ dayWidth: 280, visibleDays: 3, total: 1960 });
   });
 });
 
-describe("weekendOccupied", () => {
-  it("notices a card on Saturday or Sunday of the given week, live or archived", () => {
-    expect(weekendOccupied([card("sat", { day: "2026-11-28" })], "2026-11-23")).toEqual([true, false]);
-    expect(weekendOccupied([card("sun", { day: "2026-11-29", archivedAt: archivedAt("2026-11-29") })], "2026-11-23")).toEqual([false, true]);
-    expect(weekendOccupied([card("sat", { day: "2026-12-05" })], "2026-11-23")).toEqual([false, false]);
+describe("focusedDayOffset", () => {
+  const days = weekDays("2026-11-23");
+
+  it("puts today first with following days visible", () => {
+    const layout = dayGridLayout(900);
+    expect(focusedDayOffset(days, "2026-11-26", layout)).toBe(3 * layout.dayWidth);
   });
 
-  it("counts a card finished there even when it was planned for another day", () => {
-    const cards = [card("friday-plan", { day: "2026-11-27", archivedAt: archivedAt("2026-11-28") })];
-    expect(weekendOccupied(cards, "2026-11-23")).toEqual([true, false]);
+  it("lets even Sunday lead, with the scroller's end-space after it", () => {
+    const layout = dayGridLayout(900);
+    expect(focusedDayOffset(days, "2026-11-23", layout)).toBe(0);
+    expect(focusedDayOffset(days, "2026-11-29", layout)).toBe(6 * layout.dayWidth);
+  });
+
+  it("starts at Monday when the focused day is outside this week", () => {
+    expect(focusedDayOffset(days, "2026-11-30", dayGridLayout(900))).toBe(0);
   });
 });

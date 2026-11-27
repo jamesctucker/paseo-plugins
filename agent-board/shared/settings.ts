@@ -56,11 +56,13 @@ export const BoardCardSchema = z.object({
 export const boardDoc = defineSettings({
   id: "board",
   scope: "host",
-  version: 9,
+  version: 10,
   schema: z.object({
     cards: z.array(BoardCardSchema).default([]),
     /** Monday of the week the rollover prompt was last answered, so it asks once a week. */
     rolloverAnsweredWeek: z.string().default(""),
+    /** Day the earlier-this-week carry prompt was last answered, so it asks once a day. */
+    carryAnsweredDay: z.string().default(""),
     /**
      * Issue-keyed memos (see shared/notes.ts): the note belongs to the issue
      * or PR, not the ephemeral card, so it returns when the issue returns.
@@ -89,9 +91,10 @@ export const boardDoc = defineSettings({
   // issueTitle, v5 added gates storage + the card route, v6 added
   // declinedLinks, v7 added cardNotes, v8 made day nullable (the inbox's
   // undated state — every stored day is a string, so there is no backfill),
-  // v9 traded the daily migration stamp for the weekly rollover stamp. All
-  // but the v4 backfill ride schema defaults: every pre-v4 tracker card was
-  // a whole-issue task whose title is the issue's.
+  // v9 traded the daily migration stamp for the weekly rollover stamp; v10
+  // restored a separate daily stamp for earlier days within the current week.
+  // All but the v4 backfill ride schema defaults: every pre-v4 tracker card
+  // was a whole-issue task whose title is the issue's.
   migrate: (values, fromVersion) => {
     if (fromVersion >= 9) return values;
     const stored = { ...((values ?? {}) as Record<string, unknown>) };

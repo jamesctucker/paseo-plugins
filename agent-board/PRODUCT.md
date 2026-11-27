@@ -6,7 +6,7 @@ One person (James) who runs agents on his own work. He plans the week by moving 
 
 ## Product Purpose
 
-A full-week execution board: a Backlog column and Monday-through-Sunday day columns on the left, live Running/Review agents on the right. It complements a paper bullet journal (paper keeps the daily spread and reflection) and never replaces the tracker. Capture-first: quick-add lands in the Backlog; moving a card to a day is planning. No daily auto-carry; a Monday rollover prompt handles unfinished cards from before this week.
+A full-week execution board: three readable day columns in a typical window, four on wide screens, with the rest of Monday through Sunday available by horizontal navigation. Backlog and Running/Review agents share an optional panel opened from a persistent utility rail. It complements a paper bullet journal (paper keeps the daily spread and reflection) and never replaces the tracker. Capture-first: quick-add lands in the Backlog; moving a card to a day is planning. No automatic carry: a Monday rollover handles older weeks, and a once-daily prompt offers to move unfinished cards from earlier this week to today.
 
 ## Register
 
@@ -14,13 +14,13 @@ Product (app UI, dashboard, tool: design serves the product).
 
 ## Strategic Principles
 
-- **Quiet standing items**: nothing nags by default. The Backlog never ages or counts itself; gates ask once, not daily.
-- **Density over decoration**: a dense kanban should read at a glance. Space and weight carry hierarchy before color.
+- **Quiet standing items**: nothing nags by default. The Backlog never ages; its neutral count is wayfinding, not a gate. Gates ask once, not daily.
+- **Readable density**: three or four useful days beat seven compressed ones. Supporting workflows open on demand instead of taking permanent columns.
 - **Today is the glance's landing spot**: today underlined, siblings slightly dimmed.
 - **Zero write-back**: tracker status is read-only; the board never mutates a tracker.
 
 ## Anti-References
 
-- Sunsama's full planning ritual (not being rebuilt; only the week topology is borrowed).
+- Sunsama's full planning ritual (not being rebuilt; only the readable week viewport and utility-panel pattern are borrowed).
 - Workboard's workspace-centric kanban (different model).
 - Generic dashboard grids of identical cards.

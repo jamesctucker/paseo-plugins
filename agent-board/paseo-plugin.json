@@ -1,7 +1,7 @@
 {
   "id": "agent-board",
   "name": "Agent Board",
-  "description": "A full-week execution board: backlog and day columns on the left, live agents on the right.",
+  "description": "A full-week execution board with readable day columns and a utility panel for backlog and live agents.",
   "media": [],
   "requirements": {
     "paseo": ">=0.15.0"

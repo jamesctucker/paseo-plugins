@@ -25,6 +25,6 @@
     "vitest": "^3.2.4",
     "zod": "^4.4.3"
   },
-  "description": "A full-week execution board: backlog and day columns on the left, live agents on the right.",
+  "description": "A full-week execution board with readable day columns and a utility panel for backlog and live agents.",
   "license": "MIT"
 }

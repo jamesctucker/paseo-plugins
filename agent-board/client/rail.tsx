@@ -52,6 +52,25 @@ interface RailRowData {
   startedAt: number | null;
 }
 
+/** One partition feeds both the Agents panel and its collapsed-rail badge. */
+export function partitionRailRows(cards: BoardCard[], agents: Map<string, AgentEntry>, dismissed: Record<string, string>) {
+  const running: RailRowData[] = [];
+  const review: RailRowData[] = [];
+  for (const card of cards) {
+    const run = card.runs[card.runs.length - 1];
+    if (!run) continue;
+    const agent = agents.get(run.agentId);
+    if (!agent) continue;
+    const row = { agent, card, startedAt: Date.parse(run.startedAt) };
+    if (agent.requiresAttention) {
+      if (!isDismissed(agent, dismissed)) review.push(row);
+    } else if (agent.status === "running" || agent.status === "initializing") {
+      running.push(row);
+    }
+  }
+  return { running, review };
+}
+
 /** Long enough to see the fill land, short enough to never feel like a wait. */
 const CHECK_HOLD_MS = 320;
 
@@ -83,23 +102,7 @@ export function Rail({
   // still answers "is anything running?" at a glance.
   const [runningOpen, setRunningOpen] = useState(true);
   const [reviewOpen, setReviewOpen] = useState(true);
-  const { running, review } = useMemo(() => {
-    const running: RailRowData[] = [];
-    const review: RailRowData[] = [];
-    for (const card of cards) {
-      const run = card.runs[card.runs.length - 1];
-      if (!run) continue;
-      const agent = agents.get(run.agentId);
-      if (!agent) continue;
-      const row = { agent, card, startedAt: Date.parse(run.startedAt) };
-      if (agent.requiresAttention) {
-        if (!isDismissed(agent, dismissed)) review.push(row);
-      } else if (agent.status === "running" || agent.status === "initializing") {
-        running.push(row);
-      }
-    }
-    return { running, review };
-  }, [cards, agents, dismissed]);
+  const { running, review } = useMemo(() => partitionRailRows(cards, agents, dismissed), [cards, agents, dismissed]);
 
   return (
     <View style={{ paddingHorizontal: 12, paddingVertical: 10, gap: 4 }}>

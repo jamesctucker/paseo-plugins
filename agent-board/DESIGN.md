@@ -35,10 +35,10 @@ The host supplies the theme (14 tokens); the plugin colors everything from `them
 ## Components
 
 - **CardRow**: border 1px, radius 8 (dense) / 10, surface1; in-hand = surface2 + accent border.
-- **Column**: day column width 112–260 (share), backlog 140–232, weekend slim 30.
-- **Header**: fixed height, bottom border 1px (today 2px accent), text bottom-aligned.
-- **Rail**: fixed width 240–340, collapses to 36px strip.
-- **Dock**: 48px icon strip at the far right.
+- **Column**: equal-width days, minimum 280px. Three fill a typical viewport, four when each can be at least 300px; horizontal navigation reveals the rest.
+- **Header**: fixed height, bottom border 1px (today 2px accent), text bottom-aligned. No vertical day dividers; card spacing carries separation. Single chevrons move a day, double chevrons move a week, and Today returns to the leftmost position.
+- **Side panel**: 280–340px docked on desktop, one shared surface for Backlog or Agents. Compact layouts overlay it as a drawer.
+- **Utility rail**: persistent 48px strip with labeled Backlog and Agents buttons, count badges, and official tracker brand SVGs themed with `currentColor`.
 
 ## States
 
